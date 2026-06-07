@@ -1,6 +1,6 @@
 {
   "manifest_version": 3,
-  "name": "Antigravity Apply Bot",
+  "name": "Resume Auto Apply Bot",
   "version": "1.0.0",
   "description": "Extracts job details and triggers resume tailoring automatically.",
   "permissions": [

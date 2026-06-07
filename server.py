@@ -8,6 +8,7 @@ from fastapi.responses import FileResponse, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from dotenv import load_dotenv
+from config import SYSTEM_INSTRUCTION
 
 # Load environment variables
 load_dotenv()
@@ -179,6 +180,24 @@ async def post_config(request: Request):
             print("Error saving output_dir to rules:", e)
     return {"success": True, "message": "Settings saved successfully"}
 
+@app.post("/api/select-folder")
+async def select_folder():
+    script = 'POSIX path of (choose folder with prompt "Select Resume Output Folder:")'
+    try:
+        result = subprocess.run(
+            ['osascript', '-e', script],
+            capture_output=True,
+            text=True,
+            check=True
+        )
+        selected_path = result.stdout.strip()
+        return {"success": True, "path": selected_path}
+    except subprocess.CalledProcessError as e:
+        # Typically means the user clicked cancel or closed the window
+        return {"success": False, "cancelled": True}
+    except Exception as e:
+        return JSONResponse(status_code=500, content={"success": False, "error": str(e)})
+
 @app.get("/api/history")
 async def get_history():
     if not os.path.exists(HISTORY_FILE):
@@ -301,6 +320,7 @@ Format the output strictly as a JSON object matching this schema:
             headers={"Content-Type": "application/json"},
             json={
                 "contents": [{"parts": [{"text": prompt_text}]}],
+                "systemInstruction": {"parts": [{"text": SYSTEM_INSTRUCTION}]},
                 "generationConfig": {
                     "responseMimeType": "application/json",
                     "responseSchema": {
@@ -387,6 +407,7 @@ Format the output strictly as a JSON object matching this schema:
             headers={"Content-Type": "application/json"},
             json={
                 "contents": [{"parts": [{"text": prompt_pass2}]}],
+                "systemInstruction": {"parts": [{"text": SYSTEM_INSTRUCTION}]},
                 "generationConfig": {
                     "responseMimeType": "application/json",
                     "responseSchema": {

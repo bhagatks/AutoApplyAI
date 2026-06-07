@@ -1,4 +1,4 @@
-// Antigravity Apply Bot - Content Script
+// Resume Auto Apply Bot - Content Script
 // Automatically detects job listings on LinkedIn/Indeed and triggers tailoring when Apply is clicked.
 
 let isProcessing = false;
@@ -134,7 +134,7 @@ const showWidget = () => {
     widget.innerHTML = `
       <div class="ag-header">
         <span class="ag-logo">▲</span>
-        <span class="ag-title">Antigravity Resume Tailor</span>
+        <span class="ag-title">Resume Auto Apply Resume Tailor</span>
       </div>
       <div class="ag-steps">
         <div class="ag-step" id="ag-step-1">
@@ -302,9 +302,9 @@ document.body.addEventListener('click', (e) => {
   );
 
   if (applyButton) {
-    console.log('Antigravity Apply Bot: Detected click on Apply button, launching tailoring...');
+    console.log('Resume Auto Apply Bot: Detected click on Apply button, launching tailoring...');
     triggerAutomaticTailoring();
   }
 });
 
-console.log('Antigravity Apply Bot: Content Script loaded successfully.');
+console.log('Resume Auto Apply Bot: Content Script loaded successfully.');

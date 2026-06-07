@@ -15,6 +15,7 @@ document.addEventListener('DOMContentLoaded', () => {
   const openSettingsBtn = document.getElementById('openSettingsBtn');
   const closeSettingsBtn = document.getElementById('closeSettingsBtn');
   const outputDirInput = document.getElementById('outputDir');
+  const browseOutputDirBtn = document.getElementById('browseOutputDirBtn');
   const toggleApiKeyVisibilityBtn = document.getElementById('toggleApiKeyVisibilityBtn');
 
   // Output Panel Elements
@@ -230,6 +231,31 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   });
 
+  // Browse output directory using native mac folder picker
+  if (browseOutputDirBtn) {
+    browseOutputDirBtn.addEventListener('click', async () => {
+      browseOutputDirBtn.disabled = true;
+      const originalText = browseOutputDirBtn.innerText;
+      browseOutputDirBtn.innerText = 'Selecting...';
+      try {
+        const res = await fetch('/api/select-folder', { method: 'POST' });
+        const data = await res.json();
+        if (data.success && data.path) {
+          outputDirInput.value = data.path;
+        } else if (data.cancelled) {
+          console.log('Folder selection cancelled by user');
+        } else {
+          alert('Error selecting folder: ' + (data.error || 'Unknown error'));
+        }
+      } catch (err) {
+        alert('Failed to select folder: ' + err.message);
+      } finally {
+        browseOutputDirBtn.disabled = false;
+        browseOutputDirBtn.innerText = originalText;
+      }
+    });
+  }
+
   // Load config status
   async function loadConfig() {
     try {
@@ -375,7 +401,7 @@ document.addEventListener('DOMContentLoaded', () => {
         manualJobDesc.value = data.description;
         manualJobDesc.placeholder = 'Paste the job description text here...';
       } else if (data.login_wall) {
-        alert('This website (e.g. LinkedIn) requires user authentication to view job postings.\n\nTo automate this easily, please open the job posting tab in your browser and click the "Antigravity Apply Bot" Chrome extension in your toolbar instead!');
+        alert('This website (e.g. LinkedIn) requires user authentication to view job postings.\n\nTo automate this easily, please open the job posting tab in your browser and click the "Resume Auto Apply Bot" Chrome extension in your toolbar instead!');
         manualJobDesc.placeholder = 'LinkedIn/Job Site requires login. Use the Chrome Extension to scrape this in 1-click, or paste the text manually here.';
       } else {
         alert('Could not auto-fetch the job details: ' + (data.error || 'Unknown error'));

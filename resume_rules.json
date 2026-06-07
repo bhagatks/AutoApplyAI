@@ -27,12 +27,15 @@
       "quote"
     ],
     "macro_content_limits": {
-      "summary_sentences_max": 4,
-      "core_competencies_count": 6
+      "summary_sentences_max": 5,
+      "core_competencies_count": 8
     }
   },
   "ats_target_block": {
     "required": false,
     "format_string": "\\footnotesize \\textbf{ATS STRATEGY MATCH TARGET:} 95\\%+ Optimization (Keywords: {keywords})"
+  },
+  "file_naming": {
+    "output_dir": "/Users/bstar/Downloads/resume_backup/"
   }
 }
