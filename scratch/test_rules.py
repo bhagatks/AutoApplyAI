@@ -168,7 +168,10 @@ with open(tex_path, 'w') as f:
     f.write(template_content)
 
 print("Compiling LaTeX to PDF...")
-tectonic_cmd = f'/opt/homebrew/bin/tectonic -o "{OUTPUT_DIR}" "{tex_path}"'
+tectonic_exec = "tectonic"
+if os.path.exists("/opt/homebrew/bin/tectonic"):
+    tectonic_exec = "/opt/homebrew/bin/tectonic"
+tectonic_cmd = f'{tectonic_exec} -o "{OUTPUT_DIR}" "{tex_path}"'
 result = subprocess.run(tectonic_cmd, shell=True, capture_output=True, text=True)
 
 if result.returncode == 0 and os.path.exists(pdf_path):

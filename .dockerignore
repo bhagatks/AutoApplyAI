@@ -1,0 +1,8 @@
+.git
+output/
+*.pdf
+*.tex
+*.log
+.DS_Store
+.env
+config.json

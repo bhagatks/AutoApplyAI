@@ -232,11 +232,14 @@ async def open_folder():
     rules = load_rules()
     # Get output dir from naming rules (default to 'output')
     output_dir = rules.get("file_naming", {}).get("output_dir", "output")
+    if os.path.exists("/.dockerenv"):
+        output_dir = "output"
     
     if not os.path.exists(output_dir):
         os.makedirs(output_dir, exist_ok=True)
         
-    subprocess.run(["open", output_dir])
+    if not os.path.exists("/.dockerenv"):
+        subprocess.run(["open", output_dir])
     return {"success": True}
 
 @app.post("/api/analyze-job")
@@ -257,6 +260,8 @@ async def analyze_job(request: Request):
     # Load dynamic rules
     rules = load_rules()
     output_dir = rules.get("file_naming", {}).get("output_dir", "output")
+    if os.path.exists("/.dockerenv"):
+        output_dir = "output"
     os.makedirs(output_dir, exist_ok=True)
 
     print(f"--- Starting Python job analysis for: {job_url or 'Manual input'}")
@@ -524,7 +529,10 @@ Format the output strictly as a JSON object matching this schema:
         print(f"Saved LaTeX output to: {tex_path}")
 
         # Compile with tectonic
-        tectonic_cmd = f'/opt/homebrew/bin/tectonic -o "{output_dir}" "{tex_path}"'
+        tectonic_exec = "tectonic"
+        if os.path.exists("/opt/homebrew/bin/tectonic"):
+            tectonic_exec = "/opt/homebrew/bin/tectonic"
+        tectonic_cmd = f'{tectonic_exec} -o "{output_dir}" "{tex_path}"'
         print(f"Executing compilation: {tectonic_cmd}")
         
         result = subprocess.run(tectonic_cmd, shell=True, capture_output=True, text=True)
@@ -551,7 +559,8 @@ Format the output strictly as a JSON object matching this schema:
         print("LaTeX compilation completed successfully.")
         
         # Auto-open output folder
-        subprocess.run(["open", output_dir])
+        if not os.path.exists("/.dockerenv"):
+            subprocess.run(["open", output_dir])
 
         # Write to history logs
         history = []
