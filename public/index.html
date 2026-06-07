@@ -1,0 +1,259 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Antigravity Apply Bot - Dashboard</title>
+  <!-- Google Fonts -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Outfit:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div class="glass-app">
+    <!-- Header -->
+    <header class="app-header">
+      <div class="logo-area">
+        <div class="logo-icon">▲</div>
+        <div class="logo-text">
+          <h1>ANTIGRAVITY APPLY</h1>
+          <span class="sub-text">Automated Resume Tailoring System</span>
+        </div>
+      </div>
+      <div class="header-controls">
+        <div class="status-indicator">
+          <span class="pulse-dot green"></span>
+          <span class="status-label">Local Service Active</span>
+        </div>
+        <button id="openSettingsBtn" class="settings-trigger-btn" title="API Configuration">
+          <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+        </button>
+      </div>
+    </header>
+
+    <!-- Main Content Grid -->
+    <main class="app-body">
+      <!-- Pane 1: History Pane (Collapsible) -->
+      <section class="history-pane" id="historyPane">
+        <div class="glass-card history-card" id="historyCard">
+          <div class="card-header clickable-header" id="toggleHistoryHeader">
+            <div class="header-title-area">
+              <svg class="header-icon" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+              <h2>History</h2>
+            </div>
+            <button id="collapseHistoryBtn" class="collapse-toggle-btn" title="Collapse History">
+              <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"/></svg>
+            </button>
+          </div>
+          <!-- Collapsed Vertical Title -->
+          <div class="collapsed-title hidden" id="collapsedTitle">
+            <span>HISTORY</span>
+          </div>
+          <div class="history-list-wrapper" id="historyListWrapper">
+            <ul id="historyList" class="history-list">
+              <!-- Special Current Session Item -->
+              <li class="history-item current-item active" id="currentSessionItem">
+                <div class="hist-info">
+                  <span class="hist-title" id="currentSessionTitle">New</span>
+                  <span class="hist-company" id="currentSessionCompany">New application draft</span>
+                </div>
+                <span class="hist-score current-badge" id="currentSessionBadge">Active</span>
+              </li>
+              <!-- Dynamically populated historical jobs -->
+            </ul>
+          </div>
+        </div>
+      </section>
+
+      <!-- Pane 2: Manual Job Input Pane -->
+      <section class="input-pane" id="inputPane">
+        <div class="glass-card tool-card">
+          <div class="card-header">
+            <svg class="header-icon" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/></svg>
+            <h2>Manual Job Input</h2>
+          </div>
+          <div class="card-body">
+            <div class="form-group">
+              <label for="manualJobUrl">Job URL (Optional)</label>
+              <div class="input-with-button">
+                <input type="url" id="manualJobUrl" placeholder="https://linkedin.com/jobs/view/...">
+                <button type="button" id="fetchUrlBtn" class="btn btn-secondary" style="padding: 0 16px; min-height: 40px;">Fetch</button>
+              </div>
+            </div>
+            <div class="form-group flex-grow">
+              <label for="manualJobDesc">Job Description</label>
+              <textarea id="manualJobDesc" placeholder="Paste the job description text here..." required></textarea>
+            </div>
+            <button id="analyzeBtn" class="btn btn-accent btn-full">
+              <span class="btn-text">Tailor Resume Now</span>
+              <span class="loader hidden"></span>
+            </button>
+          </div>
+        </div>
+      </section>
+
+      <!-- Right Column: Results Dashboard -->
+      <section class="results-dashboard">
+        
+        <!-- Welcome Card (shown before search) -->
+        <div id="welcomeCard" class="glass-card welcome-card">
+          <div class="welcome-inner">
+            <div class="welcome-badge">AI Powered</div>
+            <h2>Let's land that role.</h2>
+            <p>Paste a job description or use the browser integration to instantly match your resume. We will analyze alignment, score it, tailor the LaTeX blocks, compile the PDF, and open the destination folder automatically.</p>
+            <div class="steps-graphic">
+              <div class="step-item">
+                <span class="step-num">1</span>
+                <span>Extract Job Description</span>
+              </div>
+              <div class="step-arrow">→</div>
+              <div class="step-item">
+                <span class="step-num">2</span>
+                <span>Tailor Summary & Competencies</span>
+              </div>
+              <div class="step-arrow">→</div>
+              <div class="step-item">
+                <span class="step-num">3</span>
+                <span>Auto-Compile and Open</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Main Output Panel (hidden by default) -->
+        <div id="outputPanel" class="output-panel hidden">
+          
+          <!-- Top Row: Score card and Overview -->
+          <div class="output-overview">
+            
+            <!-- ATS Score Card -->
+            <div class="glass-card score-card">
+              <div class="score-container">
+                <svg class="progress-ring" width="120" height="120">
+                  <circle class="progress-ring-circle-bg" stroke="#1f2335" stroke-width="8" fill="transparent" r="50" cx="60" cy="60"/>
+                  <circle id="scoreProgress" class="progress-ring-circle" stroke="var(--accent-color)" stroke-width="8" fill="transparent" r="50" cx="60" cy="60"/>
+                </svg>
+                <div class="score-display">
+                  <span id="scoreText">0</span>
+                  <span class="score-label">ATS Match</span>
+                </div>
+              </div>
+              <div class="job-meta">
+                <h3 id="resJobTitle">Lead AI Engineer</h3>
+                <p id="resCompanyName">Google</p>
+                <div class="action-buttons">
+                  <button id="openFolderBtn" class="btn btn-secondary btn-sm">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
+                    Open Output Folder
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            <!-- Match Analysis Card -->
+            <div class="glass-card analysis-card">
+              <div class="card-header">
+                <h2>Keywords & Gap Analysis</h2>
+              </div>
+              <div class="card-body">
+                <div id="analysisContent" class="markdown-body">
+                  <!-- Dynamically populated -->
+                </div>
+              </div>
+            </div>
+            
+          </div>
+
+          <!-- Bottom Row: Code & Text Previews -->
+          <div class="glass-card preview-card">
+            <div class="tab-header">
+              <button class="tab-btn active" data-tab="summary">Tailored Summary</button>
+              <button class="tab-btn" data-tab="competencies">Tailored Competencies</button>
+              <button class="tab-btn" data-tab="latex">Generated LaTeX Output</button>
+            </div>
+            <div class="tab-content-container">
+              <!-- Summary Tab -->
+              <div id="tab-summary" class="tab-content active">
+                <div class="text-preview-box">
+                  <div class="preview-header">
+                    <span>Summary Paragraph</span>
+                    <button class="copy-btn" data-copy="summaryText">Copy</button>
+                  </div>
+                  <div id="summaryText" class="preview-text">
+                    <!-- Loaded dynamically -->
+                  </div>
+                </div>
+              </div>
+              
+              <!-- Competencies Tab -->
+              <div id="tab-competencies" class="tab-content">
+                <div class="text-preview-box">
+                  <div class="preview-header">
+                    <span>5 Tailored Competencies</span>
+                    <button class="copy-btn" data-copy="competenciesText">Copy</button>
+                  </div>
+                  <div id="competenciesText" class="preview-text">
+                    <!-- Loaded dynamically -->
+                  </div>
+                </div>
+              </div>
+
+              <!-- LaTeX Tab -->
+              <div id="tab-latex" class="tab-content">
+                <div class="text-preview-box">
+                  <div class="preview-header">
+                    <span>Raw LaTeX Output File (output/Bhagath_Siddi_Resume.tex)</span>
+                    <button class="copy-btn" data-copy="latexText">Copy</button>
+                  </div>
+                  <pre id="latexText" class="preview-code"><code>% Generating LaTeX...</code></pre>
+                </div>
+              </div>
+            </div>
+          </div>
+
+        </div>
+
+      </section>
+    </main>
+
+    <!-- Footer -->
+    <footer class="app-footer">
+      <p>Antigravity Apply Bot — Local Mac Agent Server on Port 3000</p>
+    </footer>
+  </div>
+
+  <!-- Settings Modal Overlay -->
+  <div id="settingsModal" class="modal-overlay hidden">
+    <div class="glass-card modal-card">
+      <div class="modal-header">
+        <div class="modal-title-area">
+          <svg class="header-icon" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+          <h2>Configuration</h2>
+        </div>
+        <button id="closeSettingsBtn" class="close-modal-btn" title="Close Settings">&times;</button>
+      </div>
+      <form id="configForm" class="card-body">
+        <div class="form-group">
+          <label for="apiKey">Gemini API Key</label>
+          <div class="input-with-toggle" style="position: relative; display: flex;">
+            <input type="password" id="apiKey" placeholder="Enter your Gemini API key..." required autocomplete="off" style="flex: 1; padding-right: 40px;">
+            <button type="button" id="toggleApiKeyVisibilityBtn" class="visibility-toggle-btn" title="Show API Key" style="position: absolute; right: 10px; top: 50%; transform: translateY(-50%); background: transparent; border: none; color: var(--text-secondary); cursor: pointer; display: flex; align-items: center; justify-content: center; padding: 4px;">
+              <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="eye-icon"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+            </button>
+          </div>
+          <span class="help-text">Saved locally in .env. Enter a new key to overwrite.</span>
+        </div>
+        <div class="form-group" style="margin-top: 10px;">
+          <label for="outputDir">Resume Output Folder</label>
+          <input type="text" id="outputDir" placeholder="e.g. output" required autocomplete="off">
+          <span class="help-text">The local directory where tailored LaTeX and PDF resumes are compiled.</span>
+        </div>
+        <button type="submit" class="btn btn-primary btn-full" id="saveConfigBtn" style="margin-top: 15px;">Save Settings</button>
+      </form>
+    </div>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>
