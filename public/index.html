@@ -94,7 +94,7 @@
       </section>
 
       <!-- Right Column: Results Dashboard -->
-      <section class="results-dashboard">
+      <section class="results-dashboard details-pane">
         
         <!-- Welcome Card (shown before search) -->
         <div id="welcomeCard" class="glass-card welcome-card">
@@ -117,6 +117,38 @@
                 <span class="step-num">3</span>
                 <span>Auto-Compile and Open</span>
               </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Processing / Queue Card (hidden by default) -->
+        <div id="processingCard" class="glass-card welcome-card processing-card hidden">
+          <div class="welcome-inner">
+            <div class="status-badge-container">
+              <span id="queueBadge" class="hist-score processing">Processing...</span>
+            </div>
+            <h2 id="queueTitle">Tailoring in Progress</h2>
+            <p id="queueDescription">Your resume is being tailored using Gemini AI. Tectonic will compile the LaTeX PDF shortly.</p>
+            
+            <div class="queue-status-steps">
+              <div class="q-step" id="qStepPending">
+                <div class="q-step-circle">1</div>
+                <span>Queued in Pool</span>
+              </div>
+              <div class="q-step-line" id="qStepLine1"></div>
+              <div class="q-step" id="qStepProcessing">
+                <div class="q-step-circle">2</div>
+                <span>Tailoring AI</span>
+              </div>
+              <div class="q-step-line" id="qStepLine2"></div>
+              <div class="q-step" id="qStepCompiling">
+                <div class="q-step-circle">3</div>
+                <span>Compiling PDF</span>
+              </div>
+            </div>
+            
+            <div class="spinner-container">
+              <div class="modern-spinner"></div>
             </div>
           </div>
         </div>

@@ -1165,3 +1165,129 @@ textarea:focus {
 .history-item:hover .delete-history-btn {
   opacity: 0.9;
 }
+
+/* Queue / Processing Card Styles */
+.hist-score.pending {
+  background: rgba(148, 163, 184, 0.15); /* Slate gray */
+  color: var(--text-secondary);
+  border-color: rgba(148, 163, 184, 0.3);
+}
+
+.hist-score.processing {
+  background: rgba(245, 158, 11, 0.15); /* Amber orange/yellow */
+  color: var(--warning-color);
+  border-color: rgba(245, 158, 11, 0.3);
+  animation: pulse-orange 1.5s infinite ease-in-out;
+}
+
+.hist-score.failed {
+  background: rgba(239, 68, 68, 0.15); /* Red */
+  color: var(--danger-color);
+  border-color: rgba(239, 68, 68, 0.3);
+}
+
+@keyframes pulse-orange {
+  0% { opacity: 0.7; }
+  50% { opacity: 1; }
+  100% { opacity: 0.7; }
+}
+
+.processing-card .status-badge-container {
+  margin-bottom: 10px;
+}
+
+.queue-status-steps {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 25px;
+  background: rgba(0, 0, 0, 0.25);
+  padding: 20px 30px;
+  border-radius: 20px;
+  border: 1px solid rgba(255, 255, 255, 0.03);
+  width: 100%;
+  max-width: 500px;
+  justify-content: space-between;
+}
+
+.q-step {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.75rem;
+  color: var(--text-secondary);
+  position: relative;
+  flex: 1;
+}
+
+.q-step.active {
+  color: var(--brand-color);
+}
+
+.q-step.completed {
+  color: var(--success-color);
+}
+
+.q-step-circle {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid var(--panel-border);
+  color: var(--text-secondary);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: bold;
+  transition: all 0.3s ease;
+}
+
+.q-step.active .q-step-circle {
+  background: var(--brand-color);
+  color: white;
+  border-color: var(--brand-color);
+  box-shadow: 0 0 10px rgba(255, 128, 0, 0.4);
+}
+
+.q-step.completed .q-step-circle {
+  background: var(--success-color);
+  color: white;
+  border-color: var(--success-color);
+  box-shadow: 0 0 10px rgba(16, 185, 129, 0.4);
+}
+
+.q-step-line {
+  height: 2px;
+  background: rgba(255, 255, 255, 0.05);
+  flex: 0.5;
+  margin-top: -15px; /* Align with circle vertically */
+  transition: background 0.3s ease;
+}
+
+.q-step-line.active {
+  background: var(--brand-color);
+}
+
+.q-step-line.completed {
+  background: var(--success-color);
+}
+
+.spinner-container {
+  margin-top: 30px;
+  display: flex;
+  justify-content: center;
+}
+
+.modern-spinner {
+  width: 40px;
+  height: 40px;
+  border: 3px solid rgba(255, 255, 255, 0.05);
+  border-radius: 50%;
+  border-top-color: var(--brand-color);
+  animation: spin 1s ease-in-out infinite;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}

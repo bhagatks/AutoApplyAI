@@ -3,6 +3,9 @@ import json
 import re
 import subprocess
 import requests
+import asyncio
+import time
+import datetime
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
@@ -28,6 +31,61 @@ CONFIG_FILE = 'config.json'
 HISTORY_FILE = 'jobs.json'
 BASE_TEMPLATE_PATH = 'base_template.tex'
 RULES_FILE = 'resume_rules.json'
+
+# Async lock for jobs.json read/writes
+history_lock = asyncio.Lock()
+# Asynchronous local queue
+job_queue = asyncio.Queue()
+
+async def read_history_safe():
+    async with history_lock:
+        if not os.path.exists(HISTORY_FILE):
+            with open(HISTORY_FILE, 'w') as f:
+                json.dump([], f)
+        try:
+            with open(HISTORY_FILE, 'r') as f:
+                history = json.load(f)
+            # Ensure status exists for legacy items
+            modified = False
+            for item in history:
+                if "status" not in item:
+                    item["status"] = "completed"
+                    modified = True
+            if modified:
+                with open(HISTORY_FILE, 'w') as f:
+                    json.dump(history, f, indent=2)
+            return history
+        except Exception as e:
+            print(f"Error reading history safely: {e}")
+            return []
+
+async def write_history_safe(history):
+    async with history_lock:
+        try:
+            with open(HISTORY_FILE, 'w') as f:
+                json.dump(history, f, indent=2)
+            return True
+        except Exception as e:
+            print(f"Error writing history safely: {e}")
+            return False
+
+async def update_job_status(job_id: str, status: str, error_msg: str = None, updates: dict = None):
+    history = await read_history_safe()
+    for item in history:
+        if item.get("id") == job_id:
+            item["status"] = status
+            if error_msg:
+                item["error"] = error_msg
+            else:
+                # Clear previous error if succeeded
+                item.pop("error", None)
+            if updates:
+                for k, v in updates.items():
+                    item[k] = v
+            break
+    if len(history) > 50:
+        history = history[:50]
+    await write_history_safe(history)
 
 # Base candidate details to avoid hallucination
 BASE_PROFILE = {
@@ -275,32 +333,37 @@ async def select_folder():
 
 @app.get("/api/history")
 async def get_history():
-    if not os.path.exists(HISTORY_FILE):
-        with open(HISTORY_FILE, 'w') as f:
-            json.dump([], f)
-    with open(HISTORY_FILE, 'r') as f:
-        return json.load(f)
+    return await read_history_safe()
 
 @app.delete("/api/history/{job_id}")
 async def delete_history_item(job_id: str):
-    if not os.path.exists(HISTORY_FILE):
-        raise HTTPException(status_code=404, detail="History file not found")
+    history = await read_history_safe()
+    new_history = [job for job in history if job.get("id") != job_id]
+    
+    if len(new_history) == len(history):
+        raise HTTPException(status_code=404, detail="Item not found")
         
-    try:
-        with open(HISTORY_FILE, 'r') as f:
-            history = json.load(f)
-            
-        new_history = [job for job in history if job.get("id") != job_id]
-        
-        if len(new_history) == len(history):
-            raise HTTPException(status_code=404, detail="Item not found")
-            
-        with open(HISTORY_FILE, 'w') as f:
-            json.dump(new_history, f, indent=2)
-            
-        return {"success": True, "message": "Item deleted successfully"}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+    await write_history_safe(new_history)
+    return {"success": True, "message": "Item deleted successfully"}
+
+@app.get("/api/job-status/{job_id}")
+async def get_job_status(job_id: str):
+    history = await read_history_safe()
+    for item in history:
+        if item.get("id") == job_id:
+            return {
+                "success": True,
+                "status": item.get("status", "completed"),
+                "jobTitle": item.get("jobTitle"),
+                "companyName": item.get("companyName"),
+                "atsScore": item.get("atsScore"),
+                "analysis": item.get("analysis"),
+                "summary": item.get("summary"),
+                "competencies": item.get("competencies"),
+                "coverLetter": item.get("coverLetter"),
+                "error": item.get("error", "")
+            }
+    raise HTTPException(status_code=404, detail="Job not found")
 
 @app.post("/api/open-folder")
 async def open_folder():
@@ -317,36 +380,60 @@ async def open_folder():
         subprocess.run(["open", output_dir])
     return {"success": True}
 
-@app.post("/api/analyze-job")
-async def analyze_job(request: Request):
-    payload = await request.json()
-    job_description = payload.get("jobDescription")
-    job_url = payload.get("jobUrl", "")
+# Helper to run blocking function in executor
+async def run_blocking(func, *args):
+    loop = asyncio.get_running_loop()
+    return await loop.run_in_executor(None, func, *args)
 
-    if not job_description:
-        raise HTTPException(status_code=400, detail="Job description is required")
+async def queue_worker():
+    print("Background queue worker started.")
+    while True:
+        try:
+            job_data = await job_queue.get()
+            job_id = job_data["job_id"]
+            job_description = job_data["job_description"]
+            job_url = job_data["job_url"]
+            
+            print(f"Queue worker picked up job {job_id}. Status set to 'processing'.")
+            await update_job_status(job_id, "processing", updates={
+                "jobTitle": "Processing...",
+                "companyName": "Analyzing JD..."
+            })
+            
+            await process_job_tailoring(job_id, job_description, job_url)
+            
+        except Exception as e:
+            print(f"Error in queue worker execution: {e}")
+        finally:
+            job_queue.task_done()
 
-    # Load api key
-    config = load_config()
-    api_key = config.get("geminiApiKey") or os.getenv("GEMINI_API_KEY")
-    if not api_key:
-        raise HTTPException(status_code=400, detail="Gemini API Key is not configured. Please set it in the settings panel.")
+async def process_job_tailoring(job_id: str, job_description: str, job_url: str):
+    try:
+        # Load API key dynamically
+        config = load_config()
+        api_key = config.get("geminiApiKey") or os.getenv("GEMINI_API_KEY")
+        if not api_key:
+            await update_job_status(job_id, "failed", error_msg="Gemini API Key is not configured. Please set it in the settings panel.")
+            return
 
-    # Load dynamic rules
-    rules = load_rules()
-    output_dir = rules.get("file_naming", {}).get("output_dir", "output")
-    if os.path.exists("/.dockerenv"):
-        output_dir = "output"
-    os.makedirs(output_dir, exist_ok=True)
+        # Load dynamic rules
+        rules = load_rules()
+        output_dir = rules.get("file_naming", {}).get("output_dir", "output")
+        if os.path.exists("/.dockerenv"):
+            output_dir = "output"
+        os.makedirs(output_dir, exist_ok=True)
 
-    print(f"--- Starting Python job analysis for: {job_url or 'Manual input'}")
+        summary_sentences_max = rules.get("page_defense_layout", {}).get("macro_content_limits", {}).get("summary_sentences_max", 4)
+        competencies_count = rules.get("page_defense_layout", {}).get("macro_content_limits", {}).get("core_competencies_count", 6)
 
-    # Read constraints
-    summary_sentences_max = rules.get("page_defense_layout", {}).get("macro_content_limits", {}).get("summary_sentences_max", 4)
-    competencies_count = rules.get("page_defense_layout", {}).get("macro_content_limits", {}).get("core_competencies_count", 6)
+        # Verify job still exists in history (was not deleted while in queue)
+        history = await read_history_safe()
+        if not any(item.get("id") == job_id for item in history):
+            print(f"Job {job_id} was deleted from history before processing. Skipping.")
+            return
 
-    # Prompt design
-    prompt_text = f"""
+        # Prompt design
+        prompt_text = f"""
 You are an expert ATS optimization resume writer. Your goal is to tailor the candidate's resume summary and competencies to match the target job description so perfectly that the ATS Match Score is above 90%.
 
 Candidate Base Resume Profile:
@@ -374,7 +461,7 @@ Your tasks:
    - Map each of the {competencies_count} competencies directly to key requirements in the job description (e.g. engineering leadership, cloud computing, frontend/backend architecture, agile delivery, system scalability).
    - Weave in the exact keywords from the job description (e.g. Node.js, React, AWS, GCP, e-commerce, CRM, agile).
    - Ensure the titles and descriptions reflect keywords from the job description but remain grounded in the candidate's real capabilities as a senior director/leader.
-   - Keep the description of each competency extremely concise (at most 1-2 sentences, ~20-25 words each) to strictly respect the absolute 1-page document budget.
+   - Keep the description of each competency extremely concise (at most 1-2 sentences, ~20-25 words each) to strictly respect the absolute 1-page budget.
 
 3. Write a highly tailored, compelling Cover Letter body connecting the candidate's background (7-Eleven, CVS Health, MIT Agentic AI credentials) directly to the target role's mission and challenges.
    - You MUST structure the cover letter EXACTLY as follows, using double newlines for paragraph breaks:
@@ -403,53 +490,63 @@ Format the output strictly as a JSON object matching this schema:
 }}
 """
 
-    try:
-        # Query Gemini API
         gemini_url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={api_key}"
-        response = requests.post(
-            gemini_url,
-            headers={"Content-Type": "application/json"},
-            json={
-                "contents": [{"parts": [{"text": prompt_text}]}],
-                "systemInstruction": {"parts": [{"text": SYSTEM_INSTRUCTION}]},
-                "generationConfig": {
-                    "responseMimeType": "application/json",
-                    "responseSchema": {
-                        "type": "OBJECT",
-                        "properties": {
-                            "jobTitle": {"type": "STRING"},
-                            "companyName": {"type": "STRING"},
-                            "atsScore": {"type": "INTEGER"},
-                            "analysis": {"type": "STRING"},
-                            "summary": {"type": "STRING"},
-                            "competencies": {"type": "STRING"},
-                            "cover_letter": {"type": "STRING"},
-                            "keywords": {
-                                "type": "ARRAY",
-                                "items": {"type": "STRING"}
-                            }
-                        },
-                        "required": ["jobTitle", "companyName", "atsScore", "analysis", "summary", "competencies", "cover_letter", "keywords"]
+        
+        def post_pass1():
+            return requests.post(
+                gemini_url,
+                headers={"Content-Type": "application/json"},
+                json={
+                    "contents": [{"parts": [{"text": prompt_text}]}],
+                    "systemInstruction": {"parts": [{"text": SYSTEM_INSTRUCTION}]},
+                    "generationConfig": {
+                        "responseMimeType": "application/json",
+                        "responseSchema": {
+                            "type": "OBJECT",
+                            "properties": {
+                                "jobTitle": {"type": "STRING"},
+                                "companyName": {"type": "STRING"},
+                                "atsScore": {"type": "INTEGER"},
+                                "analysis": {"type": "STRING"},
+                                "summary": {"type": "STRING"},
+                                "competencies": {"type": "STRING"},
+                                "cover_letter": {"type": "STRING"},
+                                "keywords": {
+                                    "type": "ARRAY",
+                                    "items": {"type": "STRING"}
+                                }
+                            },
+                            "required": ["jobTitle", "companyName", "atsScore", "analysis", "summary", "competencies", "cover_letter", "keywords"]
+                        }
                     }
                 }
-            }
-        )
+            )
+
+        response = await run_blocking(post_pass1)
 
         if response.status_code != 200:
-            raise HTTPException(status_code=500, detail=f"Gemini API returned error: {response.status_code} {response.text}")
+            error_details = f"Gemini API returned error: {response.status_code} {response.text}"
+            await update_job_status(job_id, "failed", error_msg=error_details)
+            return
 
         data = response.json()
         result_text = data.get("candidates", [{}])[0].get("content", {}).get("parts", [{}])[0].get("text")
         
         if not result_text:
-            raise HTTPException(status_code=500, detail="Gemini API returned empty content.")
+            await update_job_status(job_id, "failed", error_msg="Gemini API returned empty content.")
+            return
 
         parsed_result = json.loads(result_text)
+        
+        # Update job details to actual parsed values immediately to give user visual feedback!
+        await update_job_status(job_id, "processing", updates={
+            "jobTitle": parsed_result.get("jobTitle"),
+            "companyName": parsed_result.get("companyName")
+        })
 
         # PASS 2: Double-Validation and Optimization Sweep
         print("--- Initiating Pass 2: Strict Double-Validation Sweep ---")
         
-        # Clean Draft values for Pass 2 to avoid propagating LLM formatting junk
         draft_summary = clean_latex(parsed_result.get("summary", ""), rules, is_competencies=False)
         draft_summary = substitute_forbidden_words(draft_summary, rules)
         
@@ -513,34 +610,38 @@ Format the output strictly as a JSON object matching this schema:
   "keywords": ["string"]
 }}
 """
-        response_pass2 = requests.post(
-            gemini_url,
-            headers={"Content-Type": "application/json"},
-            json={
-                "contents": [{"parts": [{"text": prompt_pass2}]}],
-                "systemInstruction": {"parts": [{"text": SYSTEM_INSTRUCTION}]},
-                "generationConfig": {
-                    "responseMimeType": "application/json",
-                    "responseSchema": {
-                        "type": "OBJECT",
-                        "properties": {
-                            "jobTitle": {"type": "STRING"},
-                            "companyName": {"type": "STRING"},
-                            "atsScore": {"type": "INTEGER"},
-                            "analysis": {"type": "STRING"},
-                            "summary": {"type": "STRING"},
-                            "competencies": {"type": "STRING"},
-                            "cover_letter": {"type": "STRING"},
-                            "keywords": {
-                                "type": "ARRAY",
-                                "items": {"type": "STRING"}
-                            }
-                        },
-                        "required": ["jobTitle", "companyName", "atsScore", "analysis", "summary", "competencies", "cover_letter", "keywords"]
+
+        def post_pass2():
+            return requests.post(
+                gemini_url,
+                headers={"Content-Type": "application/json"},
+                json={
+                    "contents": [{"parts": [{"text": prompt_pass2}]}],
+                    "systemInstruction": {"parts": [{"text": SYSTEM_INSTRUCTION}]},
+                    "generationConfig": {
+                        "responseMimeType": "application/json",
+                        "responseSchema": {
+                            "type": "OBJECT",
+                            "properties": {
+                                "jobTitle": {"type": "STRING"},
+                                "companyName": {"type": "STRING"},
+                                "atsScore": {"type": "INTEGER"},
+                                "analysis": {"type": "STRING"},
+                                "summary": {"type": "STRING"},
+                                "competencies": {"type": "STRING"},
+                                "cover_letter": {"type": "STRING"},
+                                "keywords": {
+                                    "type": "ARRAY",
+                                    "items": {"type": "STRING"}
+                                }
+                            },
+                            "required": ["jobTitle", "companyName", "atsScore", "analysis", "summary", "competencies", "cover_letter", "keywords"]
+                        }
                     }
                 }
-            }
-        )
+            )
+
+        response_pass2 = await run_blocking(post_pass2)
 
         if response_pass2.status_code == 200:
             data_pass2 = response_pass2.json()
@@ -567,7 +668,8 @@ Format the output strictly as a JSON object matching this schema:
 
         # Read template
         if not os.path.exists(BASE_TEMPLATE_PATH):
-            raise HTTPException(status_code=500, detail=f"Base template not found at {BASE_TEMPLATE_PATH}")
+            await update_job_status(job_id, "failed", error_msg=f"Base template not found at {BASE_TEMPLATE_PATH}")
+            return
             
         with open(BASE_TEMPLATE_PATH, 'r') as f:
             template_content = f.read()
@@ -587,7 +689,6 @@ Format the output strictly as a JSON object matching this schema:
         # 2. Update section spacing
         section_spacing = layout.get("section_spacing")
         if section_spacing:
-            # Replace section spacing configuration line
             template_content = re.sub(
                 r'\\titlespacing\{\\section\}[^%\n]*',
                 section_spacing.replace('\\', '\\\\'),
@@ -606,7 +707,6 @@ Format the output strictly as a JSON object matching this schema:
         # 4. Scrub forbidden environments
         forbidden_envs = layout.get("forbidden_environments", [])
         for env in forbidden_envs:
-            # Replace environment with scoped group to prevent alignment/font leakage
             template_content = template_content.replace(f"\\begin{{{env}}}", "{")
             template_content = template_content.replace(f"\\end{{{env}}}", "\\par}")
 
@@ -618,7 +718,6 @@ Format the output strictly as a JSON object matching this schema:
         template_content = template_content.replace('%TOKEN_SUMMARY_ZONE%', summary)
         template_content = template_content.replace('%TOKEN_COMPETENCIES_ZONE%', competencies)
 
-        # Dynamic Experience Titles replacement based on target jobTitle seniority
         title_7eleven, title_cvs = get_historical_titles(role_title)
         title_7eleven_escaped = clean_latex(title_7eleven, rules)
         title_7eleven_escaped = substitute_forbidden_words(title_7eleven_escaped, rules)
@@ -632,19 +731,21 @@ Format the output strictly as a JSON object matching this schema:
         ats_target = rules.get("ats_target_block", {})
         if ats_target.get("required", False):
             format_string = ats_target.get("format_string", "")
-            # Convert keywords list to a safe LaTeX comma-separated list
             safe_kw_str = clean_latex(", ".join(keywords), rules)
             ats_block = format_string.replace("{keywords}", safe_kw_str)
-            # Insert block before \end{document}
             template_content = template_content.replace("\\end{document}", ats_block + "\n\\end{document}")
 
-        # DYNAMIC FILE NAMING CONVENTION (Hardcoded format)
+        # DYNAMIC FILE NAMING CONVENTION
         company_name_norm = normalize_name(parsed_result.get("companyName", "company"))
         job_title_norm = normalize_name(parsed_result.get("jobTitle", "role"))
         
         base_filename = f"bhagath_resume_{company_name_norm}_{job_title_norm}"
         
-        tex_path = os.path.join(output_dir, f"{base_filename}.tex")
+        # Create subfolder for resume .tex files
+        resume_tex_dir = os.path.join(output_dir, "resume_tex")
+        os.makedirs(resume_tex_dir, exist_ok=True)
+        
+        tex_path = os.path.join(resume_tex_dir, f"{base_filename}.tex")
         pdf_path = os.path.join(output_dir, f"{base_filename}.pdf")
 
         # Save LaTeX file
@@ -659,7 +760,7 @@ Format the output strictly as a JSON object matching this schema:
         tectonic_cmd = f'{tectonic_exec} -o "{output_dir}" "{tex_path}"'
         print(f"Executing compilation: {tectonic_cmd}")
         
-        result = subprocess.run(tectonic_cmd, shell=True, capture_output=True, text=True)
+        result = await run_blocking(lambda: subprocess.run(tectonic_cmd, shell=True, capture_output=True, text=True))
         
         # Compile cover letter if generated
         cl_pdf_path = ""
@@ -673,7 +774,12 @@ Format the output strictly as a JSON object matching this schema:
                 cl_content = cl_content.replace('%TOKEN_COVER_LETTER_ZONE%', cover_letter)
                 
                 cl_base_filename = f"cover_letter_{company_name_norm}_{job_title_norm}"
-                cl_tex_path = os.path.join(output_dir, f"{cl_base_filename}.tex")
+                
+                # Create subfolder for coverletter .tex files
+                coverletter_tex_dir = os.path.join(output_dir, "coverletter_tex")
+                os.makedirs(coverletter_tex_dir, exist_ok=True)
+                
+                cl_tex_path = os.path.join(coverletter_tex_dir, f"{cl_base_filename}.tex")
                 cl_pdf_path = os.path.join(output_dir, f"{cl_base_filename}.pdf")
                 
                 with open(cl_tex_path, 'w') as f:
@@ -682,7 +788,7 @@ Format the output strictly as a JSON object matching this schema:
                 
                 cl_cmd = f'{tectonic_exec} -o "{output_dir}" "{cl_tex_path}"'
                 print(f"Executing Cover Letter compilation: {cl_cmd}")
-                cl_res = subprocess.run(cl_cmd, shell=True, capture_output=True, text=True)
+                cl_res = await run_blocking(lambda: subprocess.run(cl_cmd, shell=True, capture_output=True, text=True))
                 if cl_res.returncode == 0:
                     print("Cover Letter compiled successfully.")
                 else:
@@ -694,74 +800,107 @@ Format the output strictly as a JSON object matching this schema:
             print("LaTeX compilation failed:")
             print("Stdout:", result.stdout)
             print("Stderr:", result.stderr)
-            return JSONResponse(
-                status_code=200,
-                content={
-                    "success": False,
-                    "error": "LaTeX compilation failed. Please verify format strings.",
-                    "details": result.stderr or result.stdout,
-                    "atsScore": parsed_result.get("atsScore"),
-                    "jobTitle": parsed_result.get("jobTitle"),
-                    "companyName": parsed_result.get("companyName"),
-                    "analysis": parsed_result.get("analysis"),
-                    "summary": summary,
-                    "competencies": competencies,
-                    "coverLetter": cover_letter
-                }
-            )
+            await update_job_status(job_id, "failed", error_msg=f"LaTeX compilation failed: {result.stderr or result.stdout}")
+            return
 
         print("LaTeX compilation completed successfully.")
         
         # Auto-open output folder
         if not os.path.exists("/.dockerenv"):
-            subprocess.run(["open", output_dir])
+            await run_blocking(lambda: subprocess.run(["open", output_dir]))
 
-        # Write to history logs
-        history = []
-        if os.path.exists(HISTORY_FILE):
-            try:
-                with open(HISTORY_FILE, 'r') as f:
-                    history = json.load(f)
-            except Exception:
-                pass
-                
-        new_job = {
-            "id": str(int(subprocess.check_output("date +%s", shell=True).decode().strip())),
+        # Update status to completed and save all results!
+        await update_job_status(job_id, "completed", updates={
             "jobTitle": parsed_result.get("jobTitle"),
             "companyName": parsed_result.get("companyName"),
-            "jobUrl": job_url or "Manual Input",
             "atsScore": parsed_result.get("atsScore"),
-            "analysis": parsed_result.get("analysis"),
-            "summary": summary,
-            "competencies": competencies,
-            "coverLetter": cover_letter,
-            "jobDescription": job_description,
-            "date": subprocess.check_output("date -Iseconds", shell=True).decode().strip()
-        }
-        
-        history.insert(0, new_job)
-        if len(history) > 50:
-            history.pop()
-            
-        with open(HISTORY_FILE, 'w') as f:
-            json.dump(history, f, indent=2)
-
-        return {
-            "success": True,
-            "atsScore": parsed_result.get("atsScore"),
-            "jobTitle": parsed_result.get("jobTitle"),
-            "companyName": parsed_result.get("companyName"),
             "analysis": parsed_result.get("analysis"),
             "summary": summary,
             "competencies": competencies,
             "coverLetter": cover_letter,
             "pdfPath": pdf_path,
             "clPdfPath": cl_pdf_path
-        }
+        })
 
     except Exception as e:
-        print("Error processing analysis request:", e)
-        raise HTTPException(status_code=500, detail=str(e))
+        print(f"Exception during background tailoring of job {job_id}: {e}")
+        import traceback
+        traceback.print_exc()
+        await update_job_status(job_id, "failed", error_msg=str(e))
+
+@app.post("/api/analyze-job")
+async def analyze_job(request: Request):
+    payload = await request.json()
+    job_description = payload.get("jobDescription")
+    job_url = payload.get("jobUrl", "")
+
+    if not job_description:
+        raise HTTPException(status_code=400, detail="Job description is required")
+
+    config = load_config()
+    api_key = config.get("geminiApiKey") or os.getenv("GEMINI_API_KEY")
+    if not api_key:
+        raise HTTPException(status_code=400, detail="Gemini API Key is not configured. Please set it in the settings panel.")
+
+    job_id = f"{int(time.time())}_{int(time.time_ns() % 1000000):06d}"
+
+    new_job = {
+        "id": job_id,
+        "jobTitle": "Queued...",
+        "companyName": "Pending...",
+        "jobUrl": job_url or "Manual Input",
+        "atsScore": 0,
+        "analysis": "Job is currently queued in the local background processing pool. It will be analyzed sequentially.",
+        "summary": "",
+        "competencies": "",
+        "coverLetter": "",
+        "jobDescription": job_description,
+        "date": datetime.datetime.now().astimezone().isoformat(timespec='seconds'),
+        "status": "pending"
+    }
+
+    # Save to history safely
+    history = await read_history_safe()
+    history.insert(0, new_job)
+    await write_history_safe(history)
+
+    # Queue the job
+    await job_queue.put({
+        "job_id": job_id,
+        "job_description": job_description,
+        "job_url": job_url
+    })
+
+    return {
+        "success": True,
+        "jobId": job_id,
+        "status": "pending"
+    }
+
+@app.on_event("startup")
+async def startup_event():
+    # Start the queue worker
+    asyncio.create_task(queue_worker())
+    
+    # Scan jobs.json for pending or processing tasks and re-queue them
+    history = await read_history_safe()
+    requeued_count = 0
+    # Process oldest first to preserve FIFO order (history is newest first, so we reverse it!)
+    for item in reversed(history):
+        status = item.get("status", "completed")
+        if status in ("pending", "processing"):
+            # Set status back to pending to be clean
+            item["status"] = "pending"
+            await job_queue.put({
+                "job_id": item["id"],
+                "job_description": item["jobDescription"],
+                "job_url": item["jobUrl"]
+            })
+            requeued_count += 1
+            
+    if requeued_count > 0:
+        print(f"Re-queued {requeued_count} pending/processing jobs on startup.")
+        await write_history_safe(history)
 # Helper: Clean raw HTML text
 def clean_html(html):
     # Strip script and style tags and their contents

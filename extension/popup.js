@@ -98,11 +98,13 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     // Step 2: Tailoring via Gemini API
     stepAi.classList.add('active');
+    stepAi.innerText = 'Queued: Waiting in FIFO pool...';
 
+    let baseUrl = 'http://localhost:3000';
     try {
       let res;
       try {
-        res = await fetch('http://localhost:3000/api/analyze-job', {
+        res = await fetch(`${baseUrl}/api/analyze-job`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -112,7 +114,8 @@ document.addEventListener('DOMContentLoaded', async () => {
         });
       } catch (fetchErr) {
         console.log('Port 3000 fetch failed, trying port 8000 (Docker)...', fetchErr);
-        res = await fetch('http://localhost:8000/api/analyze-job', {
+        baseUrl = 'http://localhost:8000';
+        res = await fetch(`${baseUrl}/api/analyze-job`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -128,38 +131,77 @@ document.addEventListener('DOMContentLoaded', async () => {
         throw new Error(data.error || data.detail || 'Server returned an error');
       }
 
+      // Enter polling phase
+      const jobData = await new Promise((resolve, reject) => {
+        const pollInterval = 2000;
+        const intervalId = setInterval(async () => {
+          try {
+            const statusRes = await fetch(`${baseUrl}/api/job-status/${data.jobId}`);
+            if (!statusRes.ok) {
+              clearInterval(intervalId);
+              reject(new Error(`Server status check failed: ${statusRes.status}`));
+              return;
+            }
+            const statusData = await statusRes.json();
+            if (!statusData.success) {
+              clearInterval(intervalId);
+              reject(new Error(statusData.error || 'Failed to check status'));
+              return;
+            }
+
+            if (statusData.status === 'processing') {
+              stepAi.classList.add('active');
+              const comp = statusData.companyName || 'Analyzing JD...';
+              stepAi.innerText = `Tailoring for ${comp}...`;
+            } else if (statusData.status === 'completed') {
+              clearInterval(intervalId);
+              resolve(statusData);
+            } else if (statusData.status === 'failed') {
+              clearInterval(intervalId);
+              reject(new Error(statusData.error || 'Job tailoring failed on backend.'));
+            }
+          } catch (pollErr) {
+            clearInterval(intervalId);
+            reject(pollErr);
+          }
+        }, pollInterval);
+      });
+
+      // Tailoring Success
       stepAi.classList.remove('active');
       stepAi.classList.add('success');
-      stepAi.innerText = `✓ Tailored for ${data.companyName} (${data.atsScore}% ATS)`;
+      stepAi.innerText = `✓ Tailored for ${jobData.companyName} (${jobData.atsScore}% ATS)`;
 
-      // Step 3: Compiling
-      stepCompile.classList.add('active');
+      // Step 3: Compiling (already completed if status is completed)
+      stepCompile.classList.remove('active');
+      stepCompile.classList.add('success');
+      stepCompile.innerText = '✓ Compiled LaTeX to PDF';
 
-      if (data.success === false && data.error && data.error.includes('compilation')) {
-        // Tectonic failed
+      // Step 4: Done
+      stepDone.classList.add('success');
+      stepDone.innerText = '✓ Completed! PDF opened in Finder';
+
+      runBtn.innerText = 'Tailored Successfully!';
+    } catch (err) {
+      if (err.message && err.message.includes('compilation')) {
+        // Tectonic failed but LaTeX was saved
+        stepAi.classList.remove('active');
+        stepAi.classList.add('success');
+        stepAi.innerText = '✓ Tailored (check dashboard)';
+
         stepCompile.classList.remove('active');
         stepCompile.style.color = 'var(--warning-color)';
         stepCompile.innerText = '⚠ Compile failed, check dashboard';
         
         stepDone.classList.add('active');
         stepDone.innerText = 'LaTeX saved. Check browser dashboard.';
+        runBtn.innerText = 'Completed with warnings';
       } else {
-        // Tectonic succeeded
-        stepCompile.classList.remove('active');
-        stepCompile.classList.add('success');
-        stepCompile.innerText = '✓ Compiled LaTeX to PDF';
-
-        // Step 4: Done
-        stepDone.classList.add('success');
-        stepDone.innerText = '✓ Completed! PDF opened in Finder';
+        stepAi.classList.remove('active');
+        stepAi.style.color = 'var(--danger-color)';
+        stepAi.innerText = '✗ Tailor failed: ' + err.message;
+        resetBtn();
       }
-
-      runBtn.innerText = 'Tailored Successfully!';
-    } catch (err) {
-      stepAi.classList.remove('active');
-      stepAi.style.color = 'var(--danger-color)';
-      stepAi.innerText = '✗ Tailor failed: ' + err.message;
-      resetBtn();
     }
   });
 

@@ -225,7 +225,9 @@ else:
     print(f"✗ [FAILED] File naming convention normalization. Result: {base_filename}")
 
 os.makedirs(OUTPUT_DIR, exist_ok=True)
-tex_path = os.path.join(OUTPUT_DIR, f"{base_filename}.tex")
+resume_tex_dir = os.path.join(OUTPUT_DIR, "resume_tex")
+os.makedirs(resume_tex_dir, exist_ok=True)
+tex_path = os.path.join(resume_tex_dir, f"{base_filename}.tex")
 pdf_path = os.path.join(OUTPUT_DIR, f"{base_filename}.pdf")
 
 with open(tex_path, 'w') as f:

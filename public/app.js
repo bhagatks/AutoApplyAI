@@ -9,6 +9,7 @@ document.addEventListener('DOMContentLoaded', () => {
   const historyList = document.getElementById('historyList');
   const welcomeCard = document.getElementById('welcomeCard');
   const outputPanel = document.getElementById('outputPanel');
+  const processingCard = document.getElementById('processingCard');
 
   // Settings Modal Elements
   const settingsModal = document.getElementById('settingsModal');
@@ -50,6 +51,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // Global State
   let activeHistoryItem = null;
+  let historyPollInterval = null;
 
   // Initialize
   loadConfig();
@@ -293,7 +295,37 @@ document.addEventListener('DOMContentLoaded', () => {
         emptyLi.className = 'empty-state';
         emptyLi.innerText = 'No tailored resumes yet. Submit a job to start.';
         historyList.appendChild(emptyLi);
+        
+        // Stop polling if active
+        if (historyPollInterval) {
+          clearInterval(historyPollInterval);
+          historyPollInterval = null;
+        }
         return;
+      }
+
+      // If activeHistoryItem is currently selected and updated in background, refresh the preview
+      if (activeHistoryItem) {
+        const updatedJob = data.find(j => j.id === activeHistoryItem.id);
+        if (updatedJob) {
+          if (updatedJob.status !== activeHistoryItem.status || updatedJob.status === 'processing' || updatedJob.status === 'pending') {
+            activeHistoryItem = updatedJob;
+            displayJobResult(updatedJob);
+          }
+        }
+      }
+
+      // Setup/manage polling interval based on active jobs in the list
+      const hasActiveJobs = data.some(job => job.status === 'pending' || job.status === 'processing');
+      if (hasActiveJobs) {
+        if (!historyPollInterval) {
+          historyPollInterval = setInterval(loadHistory, 3000);
+        }
+      } else {
+        if (historyPollInterval) {
+          clearInterval(historyPollInterval);
+          historyPollInterval = null;
+        }
       }
 
       data.forEach(job => {
@@ -304,8 +336,18 @@ document.addEventListener('DOMContentLoaded', () => {
           li.classList.add('active');
         }
         
-        const isHigh = job.atsScore >= 80;
-        const scoreClass = isHigh ? 'hist-score high' : 'hist-score';
+        let scoreOrBadge = '';
+        if (job.status === 'pending') {
+          scoreOrBadge = `<span class="hist-score pending">Pending</span>`;
+        } else if (job.status === 'processing') {
+          scoreOrBadge = `<span class="hist-score processing">Processing</span>`;
+        } else if (job.status === 'failed') {
+          scoreOrBadge = `<span class="hist-score failed">Failed</span>`;
+        } else {
+          const isHigh = job.atsScore >= 80;
+          const scoreClass = isHigh ? 'hist-score high' : 'hist-score';
+          scoreOrBadge = `<span class="${scoreClass}">${job.atsScore}%</span>`;
+        }
         
         const dateStr = new Date(job.date).toLocaleDateString(undefined, {
           month: 'short',
@@ -321,7 +363,7 @@ document.addEventListener('DOMContentLoaded', () => {
             <span class="hist-date">${dateStr}</span>
           </div>
           <div class="hist-meta-right">
-            <span class="${scoreClass}">${job.atsScore}%</span>
+            ${scoreOrBadge}
             <button class="delete-history-btn" title="Delete Resume">
               <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><line x1="10" y1="11" x2="10" y2="17"/><line x1="14" y1="11" x2="14" y2="17"/></svg>
             </button>
@@ -443,24 +485,25 @@ document.addEventListener('DOMContentLoaded', () => {
       });
       const data = await res.json();
 
-      if (res.ok) {
-        // Display result
-        displayJobResult(data);
-
-        // Refresh history
+      if (res.ok && data.success) {
+        // Refresh history to include the newly queued job
         await loadHistory();
         
-        // Set the active history item state
-        setTimeout(() => {
-          // Find the new item in history (first child under currentSessionItem)
-          const firstHistItem = historyList.querySelector('.history-item:not(.current-item)');
-          if (firstHistItem) {
-            document.querySelectorAll('.history-item').forEach(item => item.classList.remove('active'));
-            firstHistItem.classList.add('active');
-            // Mock activeHistoryItem
-            activeHistoryItem = { id: firstHistItem.getAttribute('data-id') || 'newly-created' };
+        // Highlight and select the newly queued job
+        const newJobId = data.jobId;
+        const firstHistItem = historyList.querySelector(`[data-id="${newJobId}"]`);
+        if (firstHistItem) {
+          document.querySelectorAll('.history-item').forEach(item => item.classList.remove('active'));
+          firstHistItem.classList.add('active');
+          
+          // Set activeHistoryItem state and fetch current status
+          const resStatus = await fetch(`/api/job-status/${newJobId}`);
+          const jobStatusData = await resStatus.json();
+          if (jobStatusData.success) {
+            activeHistoryItem = { id: newJobId, ...jobStatusData };
+            displayJobResult(activeHistoryItem);
           }
-        }, 150);
+        }
       } else {
         alert('Error: ' + (data.error || data.detail || 'Server error'));
       }
@@ -477,41 +520,106 @@ document.addEventListener('DOMContentLoaded', () => {
   function displayJobResult(data) {
     // Hide welcome card
     welcomeCard.classList.add('hidden');
-    outputPanel.classList.remove('hidden');
 
-    // Populate Score & Meta
-    resJobTitle.innerText = data.jobTitle || 'Lead AI Engineer';
-    resCompanyName.innerText = data.companyName || 'Company';
-    scoreText.innerText = data.atsScore || '0';
+    const status = data.status || 'completed';
 
-    // Animate circular progress ring
-    const radius = 50;
-    const circumference = 2 * Math.PI * radius;
-    const offset = circumference - ((data.atsScore || 0) / 100) * circumference;
-    scoreProgress.style.strokeDasharray = `${circumference}`;
-    scoreProgress.style.strokeDashoffset = `${offset}`;
+    if (status === 'pending' || status === 'processing') {
+      // Show processing card, hide output panel
+      outputPanel.classList.add('hidden');
+      processingCard.classList.remove('hidden');
 
-    // Color progress ring according to score
-    if (data.atsScore >= 85) {
-      scoreProgress.style.stroke = 'var(--success-color)';
-    } else if (data.atsScore >= 70) {
-      scoreProgress.style.stroke = 'var(--brand-color)';
+      const queueBadge = document.getElementById('queueBadge');
+      const queueTitle = document.getElementById('queueTitle');
+      const queueDescription = document.getElementById('queueDescription');
+      const qStepPending = document.getElementById('qStepPending');
+      const qStepProcessing = document.getElementById('qStepProcessing');
+      const qStepCompiling = document.getElementById('qStepCompiling');
+      const qStepLine1 = document.getElementById('qStepLine1');
+      const qStepLine2 = document.getElementById('qStepLine2');
+      const stepsContainer = processingCard.querySelector('.queue-status-steps');
+      const spinnerContainer = processingCard.querySelector('.spinner-container');
+
+      stepsContainer.classList.remove('hidden');
+      spinnerContainer.classList.remove('hidden');
+
+      if (status === 'pending') {
+        queueBadge.innerText = 'Pending';
+        queueBadge.className = 'hist-score pending';
+        queueTitle.innerText = 'Job Queued';
+        queueDescription.innerText = 'Your tailoring request is in the local background queue and will begin processing shortly.';
+
+        qStepPending.className = 'q-step active';
+        qStepProcessing.className = 'q-step';
+        qStepCompiling.className = 'q-step';
+        qStepLine1.className = 'q-step-line';
+        qStepLine2.className = 'q-step-line';
+      } else {
+        queueBadge.innerText = 'Processing...';
+        queueBadge.className = 'hist-score processing';
+        queueTitle.innerText = 'Tailoring & Compiling';
+        queueDescription.innerText = 'Gemini AI is analyzing the job description, adjusting keywords, and tailoring your resume. LaTeX PDF compilation will run next.';
+
+        qStepPending.className = 'q-step completed';
+        qStepLine1.className = 'q-step-line completed';
+        qStepProcessing.className = 'q-step active';
+        qStepLine2.className = 'q-step-line active';
+        qStepCompiling.className = 'q-step active';
+      }
+    } else if (status === 'failed') {
+      // Show error in processing card, hide output panel
+      outputPanel.classList.add('hidden');
+      processingCard.classList.remove('hidden');
+
+      const queueBadge = document.getElementById('queueBadge');
+      const queueTitle = document.getElementById('queueTitle');
+      const queueDescription = document.getElementById('queueDescription');
+      const stepsContainer = processingCard.querySelector('.queue-status-steps');
+      const spinnerContainer = processingCard.querySelector('.spinner-container');
+
+      queueBadge.innerText = 'Failed';
+      queueBadge.className = 'hist-score failed';
+      queueTitle.innerText = 'Tailoring Failed';
+      queueDescription.innerHTML = `<span style="color: var(--danger-color); font-weight: 600;">Error:</span><br>${data.error || 'An unknown error occurred during tailoring.'}`;
+
+      stepsContainer.classList.add('hidden');
+      spinnerContainer.classList.add('hidden');
     } else {
-      scoreProgress.style.stroke = 'var(--danger-color)';
+      // Completed!
+      processingCard.classList.add('hidden');
+      outputPanel.classList.remove('hidden');
+
+      // Populate Score & Meta
+      resJobTitle.innerText = data.jobTitle || 'Lead AI Engineer';
+      resCompanyName.innerText = data.companyName || 'Company';
+      scoreText.innerText = data.atsScore || '0';
+
+      // Animate circular progress ring
+      const radius = 50;
+      const circumference = 2 * Math.PI * radius;
+      const offset = circumference - ((data.atsScore || 0) / 100) * circumference;
+      scoreProgress.style.strokeDasharray = `${circumference}`;
+      scoreProgress.style.strokeDashoffset = `${offset}`;
+
+      // Color progress ring according to score
+      if (data.atsScore >= 85) {
+        scoreProgress.style.stroke = 'var(--success-color)';
+      } else if (data.atsScore >= 70) {
+        scoreProgress.style.stroke = 'var(--brand-color)';
+      } else {
+        scoreProgress.style.stroke = 'var(--danger-color)';
+      }
+
+      // Populate Gap Analysis
+      analysisContent.innerHTML = formatMarkdown(data.analysis || '');
+
+      // Populate text previews
+      summaryText.innerText = data.summary || '';
+      competenciesText.innerText = data.competencies || '';
+      coverLetterText.innerText = data.coverLetter || '';
+
+      // Assemble preview of compiled LaTeX
+      assembleLaTeXPreview(data.summary, data.competencies);
     }
-
-    // Populate Gap Analysis
-    // Convert basic markdown format (bold and list items) into simple HTML structures
-    analysisContent.innerHTML = formatMarkdown(data.analysis || '');
-
-    // Populate text previews
-    summaryText.innerText = data.summary || '';
-    competenciesText.innerText = data.competencies || '';
-    coverLetterText.innerText = data.coverLetter || '';
-    
-    // Assemble preview of compiled LaTeX (replace placeholders on client side for display)
-    // To give user nice context
-    assembleLaTeXPreview(data.summary, data.competencies);
   }
 
   // Fetch full base template and show generated code preview
