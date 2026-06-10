@@ -243,14 +243,27 @@ const triggerAutomaticTailoring = async () => {
   setStepState(2, 'active');
 
   try {
-    const res = await fetch('http://localhost:3000/api/analyze-job', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        jobDescription: jd,
-        jobUrl: url
-      })
-    });
+    let res;
+    try {
+      res = await fetch('http://localhost:3000/api/analyze-job', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          jobDescription: jd,
+          jobUrl: url
+        })
+      });
+    } catch (fetchErr) {
+      console.log('Port 3000 fetch failed, trying port 8000 (Docker)...', fetchErr);
+      res = await fetch('http://localhost:8000/api/analyze-job', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          jobDescription: jd,
+          jobUrl: url
+        })
+      });
+    }
 
     const data = await res.json();
 

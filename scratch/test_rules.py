@@ -2,32 +2,86 @@ import os
 import json
 import re
 import subprocess
+import sys
+
+# Add parent directory to sys.path to allow importing from server.py
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 RULES_FILE = 'resume_rules.json'
 TEMPLATE_FILE = 'base_template.tex'
 OUTPUT_DIR = 'output'
 
 # Escaping function identical to server.py
-def clean_latex(text, rules, is_competencies=False):
+def clean_latex(text, rules, is_competencies=False, is_cover_letter=False):
     if not text:
         return ""
+    
+    # Strip any \section, \subsection, \subsubsection commands and their contents
+    text = re.sub(r'\\(?:sub){0,2}section\*?\{[^}]*\}', '', text, flags=re.IGNORECASE)
+    
+    # Strip common environment begin/end lines
+    text = re.sub(r'\\begin\{(?:itemize|quote|enumerate|center|flushleft|flushright)\}', '', text, flags=re.IGNORECASE)
+    text = re.sub(r'\\end\{(?:itemize|quote|enumerate|center|flushleft|flushright)\}', '', text, flags=re.IGNORECASE)
+    
+    # Strip common spacing and alignment commands
+    text = re.sub(r'\\(?:v|h)space\*?\{[^}]*\}', '', text, flags=re.IGNORECASE)
+    text = re.sub(r'\\(?:v|h)fill', '', text, flags=re.IGNORECASE)
+    
+    # Strip specific bold headers the LLM might prepend
+    text = re.sub(r'\\textbf\{Executive\s+Summary\}', '', text, flags=re.IGNORECASE)
+    text = re.sub(r'\\textbf\{Core\s+Competencies\}', '', text, flags=re.IGNORECASE)
+    text = re.sub(r'\\textbf\{Core\s+AI\s+Competencies\s+\&\s+Technical\s+Leadership\}', '', text, flags=re.IGNORECASE)
+    text = re.sub(r'\\textbf\{Core\s+AI\s+Competencies\s+and\s+Technical\s+Leadership\}', '', text, flags=re.IGNORECASE)
+    
+    # Strip plain text headers at the start of the string (case-insensitive)
+    text = re.sub(r'^\s*Executive\s+Summary\s*[:\-]?\s*', '', text, flags=re.IGNORECASE)
+    text = re.sub(r'^\s*Core\s+Competencies\s*[:\-]?\s*', '', text, flags=re.IGNORECASE)
+    text = re.sub(r'^\s*Core\s+AI\s+Competencies\s+and\s+Technical\s+Leadership\s*[:\-]?\s*', '', text, flags=re.IGNORECASE)
+    
+    if is_competencies:
+        # Strip any \item \textbf{Core Competencies} or \item \textbf{Executive Summary} that might have slipped through
+        text = re.sub(r'\\item\s*\\textbf\{Executive\s+Summary\}', '', text, flags=re.IGNORECASE)
+        text = re.sub(r'\\item\s*\\textbf\{Core\s+Competencies\}', '', text, flags=re.IGNORECASE)
+    else:
+        # For summary, strip any leading \item commands or bullet formatting the LLM might have used
+        text = re.sub(r'^\s*\\item\s*\\textbf\{[^}]*\}\s*', '', text, flags=re.IGNORECASE)
+        text = re.sub(r'^\s*\\item\s*', '', text, flags=re.IGNORECASE)
+
+    # 1. Substitute forbidden characters based on resume_rules.json
     forbidden_chars = rules.get("syntax_constraints", {}).get("forbidden_characters", {})
     
+    # Process & and % strictly according to the json rules
     if "&" in forbidden_chars:
+        # e.g., substitute with "and"
         text = text.replace("&", " and ")
         
     if "%" in forbidden_chars:
+        # e.g., escape percent symbol (negative lookbehind to avoid double-escaping)
         text = re.sub(r'(?<!\\)%', r'\%', text)
 
+    # 2. Apply standard safety escape codes for other breaking LaTeX characters
     text = re.sub(r'(?<!\\)_', r'\_', text)
     text = re.sub(r'(?<!\\)\$', r'\$', text)
     text = re.sub(r'(?<!\\)#', r'\#', text)
     
-    if not is_competencies:
+    # 3. Clean up spacing
+    if is_cover_letter:
+        # Normalize double newlines to paragraph breaks, collapse other spacing
+        text = re.sub(r'\r\n', '\n', text)
+        text = re.sub(r'\n{2,}', ' <PARAGRAPH_BREAK> ', text)
+        text = re.sub(r'\s+', ' ', text)
+        text = text.replace('<PARAGRAPH_BREAK>', '\n\n')
+    elif not is_competencies:
         text = re.sub(r'\s+', ' ', text)
     else:
+        # Normalize bullet formatting
         lines = [line.strip() for line in text.split("\n") if line.strip()]
-        text = "\n".join(lines)
+        cleaned_lines = []
+        for line in lines:
+            if not line or line.strip() == r"\item" or line.strip() == r"\item \textbf{}":
+                continue
+            cleaned_lines.append(line)
+        text = "\n".join(cleaned_lines)
         
     return text.strip()
 
@@ -138,8 +192,18 @@ mock_summary = clean_latex("Visionary leader with 20 plus years of experience in
 mock_competencies = clean_latex("\\item \\textbf{AI Engineering:} Building ML solutions.\n\\item \\textbf{MLOps:} Scaled pipelines.", rules, is_competencies=True)
 mock_keywords = ["MLOps", "LLMs", "FastAPI"]
 
+from server import get_historical_titles
+
+role_title = 'STAFF AI ENGINEER'
+title_7eleven, title_cvs = get_historical_titles(role_title)
+title_7eleven_escaped = clean_latex(title_7eleven, rules)
+title_cvs_escaped = clean_latex(title_cvs, rules)
+
+template_content = template_content.replace('%TOKEN_ROLE_ZONE%', role_title)
 template_content = template_content.replace('%TOKEN_SUMMARY_ZONE%', mock_summary)
 template_content = template_content.replace('%TOKEN_COMPETENCIES_ZONE%', mock_competencies)
+template_content = template_content.replace('%TOKEN_7ELEVEN_TITLE_ZONE%', title_7eleven_escaped)
+template_content = template_content.replace('%TOKEN_CVS_TITLE_ZONE%', title_cvs_escaped)
 
 # Add ATS strategy target block
 ats_target = rules.get("ats_target_block", {})

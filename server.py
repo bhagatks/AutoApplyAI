@@ -91,16 +91,80 @@ def save_config(api_key):
         
     os.environ["GEMINI_API_KEY"] = api_key
 
+# Helper: Determine dynamic titles for 7-Eleven and CVS Health based on seniority of the target jobTitle
+def get_historical_titles(target_title):
+    if not target_title:
+        return (
+            "Senior Engineering Manager | Head of Technology - 7Now Delivery Platform",
+            "Director | Engineering Manager - Digital Applications and Regulated Infrastructure"
+        )
+    
+    title_lower = target_title.lower()
+    
+    # 1. Senior Director or Director
+    if "director" in title_lower:
+        return (
+            "Head of Technology - 7Now Delivery Platform",
+            "Director | Engineering Manager - Digital Applications and Regulated Infrastructure"
+        )
+    
+    # 2. Senior Manager (contains 'manager' and either 'senior' or 'sr')
+    elif "manager" in title_lower and ("senior" in title_lower or "sr" in title_lower):
+        return (
+            "Sr. Engineering Manager - 7Now Delivery Platform",
+            "Engineering Manager - Digital Applications and Regulated Infrastructure"
+        )
+    
+    # 3. Engineering Manager (contains 'manager')
+    elif "manager" in title_lower:
+        return (
+            "Engineering Manager - 7Now Delivery Platform",
+            "Engineering Manager - Digital Applications and Regulated Infrastructure"
+        )
+    
+    # Fallback
+    else:
+        return (
+            "Senior Engineering Manager | Head of Technology - 7Now Delivery Platform",
+            "Director | Engineering Manager - Digital Applications and Regulated Infrastructure"
+        )
+
 # Helper: Dynamic LaTeX escaping using loaded rules profile
-def clean_latex(text, rules, is_competencies=False):
+def clean_latex(text, rules, is_competencies=False, is_cover_letter=False):
     if not text:
         return ""
     
-    if is_competencies:
-        # Strip any \begin{itemize} or \end{itemize} wrappers returned by LLM
-        text = re.sub(r'\\begin\{itemize\}', '', text, flags=re.IGNORECASE)
-        text = re.sub(r'\\end\{itemize\}', '', text, flags=re.IGNORECASE)
+    # Strip any \section, \subsection, \subsubsection commands and their contents
+    text = re.sub(r'\\(?:sub){0,2}section\*?\{[^}]*\}', '', text, flags=re.IGNORECASE)
     
+    # Strip common environment begin/end lines
+    text = re.sub(r'\\begin\{(?:itemize|quote|enumerate|center|flushleft|flushright)\}', '', text, flags=re.IGNORECASE)
+    text = re.sub(r'\\end\{(?:itemize|quote|enumerate|center|flushleft|flushright)\}', '', text, flags=re.IGNORECASE)
+    
+    # Strip common spacing and alignment commands
+    text = re.sub(r'\\(?:v|h)space\*?\{[^}]*\}', '', text, flags=re.IGNORECASE)
+    text = re.sub(r'\\(?:v|h)fill', '', text, flags=re.IGNORECASE)
+    
+    # Strip specific bold headers the LLM might prepend
+    text = re.sub(r'\\textbf\{Executive\s+Summary\}', '', text, flags=re.IGNORECASE)
+    text = re.sub(r'\\textbf\{Core\s+Competencies\}', '', text, flags=re.IGNORECASE)
+    text = re.sub(r'\\textbf\{Core\s+AI\s+Competencies\s+\&\s+Technical\s+Leadership\}', '', text, flags=re.IGNORECASE)
+    text = re.sub(r'\\textbf\{Core\s+AI\s+Competencies\s+and\s+Technical\s+Leadership\}', '', text, flags=re.IGNORECASE)
+    
+    # Strip plain text headers at the start of the string (case-insensitive)
+    text = re.sub(r'^\s*Executive\s+Summary\s*[:\-]?\s*', '', text, flags=re.IGNORECASE)
+    text = re.sub(r'^\s*Core\s+Competencies\s*[:\-]?\s*', '', text, flags=re.IGNORECASE)
+    text = re.sub(r'^\s*Core\s+AI\s+Competencies\s+and\s+Technical\s+Leadership\s*[:\-]?\s*', '', text, flags=re.IGNORECASE)
+    
+    if is_competencies:
+        # Strip any \item \textbf{Core Competencies} or \item \textbf{Executive Summary} that might have slipped through
+        text = re.sub(r'\\item\s*\\textbf\{Executive\s+Summary\}', '', text, flags=re.IGNORECASE)
+        text = re.sub(r'\\item\s*\\textbf\{Core\s+Competencies\}', '', text, flags=re.IGNORECASE)
+    else:
+        # For summary, strip any leading \item commands or bullet formatting the LLM might have used
+        text = re.sub(r'^\s*\\item\s*\\textbf\{[^}]*\}\s*', '', text, flags=re.IGNORECASE)
+        text = re.sub(r'^\s*\\item\s*', '', text, flags=re.IGNORECASE)
+
     # 1. Substitute forbidden characters based on resume_rules.json
     forbidden_chars = rules.get("syntax_constraints", {}).get("forbidden_characters", {})
     
@@ -119,12 +183,23 @@ def clean_latex(text, rules, is_competencies=False):
     text = re.sub(r'(?<!\\)#', r'\#', text)
     
     # 3. Clean up spacing
-    if not is_competencies:
+    if is_cover_letter:
+        # Normalize double newlines to paragraph breaks, collapse other spacing
+        text = re.sub(r'\r\n', '\n', text)
+        text = re.sub(r'\n{2,}', ' <PARAGRAPH_BREAK> ', text)
+        text = re.sub(r'\s+', ' ', text)
+        text = text.replace('<PARAGRAPH_BREAK>', '\n\n')
+    elif not is_competencies:
         text = re.sub(r'\s+', ' ', text)
     else:
         # Normalize bullet formatting
         lines = [line.strip() for line in text.split("\n") if line.strip()]
-        text = "\n".join(lines)
+        cleaned_lines = []
+        for line in lines:
+            if not line or line.strip() == r"\item" or line.strip() == r"\item \textbf{}":
+                continue
+            cleaned_lines.append(line)
+        text = "\n".join(cleaned_lines)
         
     return text.strip()
 
@@ -301,9 +376,19 @@ Your tasks:
    - Ensure the titles and descriptions reflect keywords from the job description but remain grounded in the candidate's real capabilities as a senior director/leader.
    - Keep the description of each competency extremely concise (at most 1-2 sentences, ~20-25 words each) to strictly respect the absolute 1-page document budget.
 
-3. Compute an ATS Match Score (0 to 100) reflecting the match percentage. Since your task is to successfully tailor the resume, your final tailored content should achieve a score of 90 or higher.
-4. Extract the jobTitle and companyName from the job description or page details.
-5. Provide a list of at most 10-15 most critical matching keywords (an array of strings) and a detailed match analysis explaining how the candidate's transferable skills were mapped to the job requirements.
+3. Write a highly tailored, compelling Cover Letter body connecting the candidate's background (7-Eleven, CVS Health, MIT Agentic AI credentials) directly to the target role's mission and challenges.
+   - You MUST structure the cover letter EXACTLY as follows, using double newlines for paragraph breaks:
+     Recipient Line: Hiring Team [Company Name] (or specific hiring manager and team if named, e.g., Andrew Phelan and the Moonshot Labs Hiring Team)
+     Location Line: [Location context from the JD, e.g. Dallas-Fort Worth Metroplex, TX]
+     Subject Line: Subject: Application for [Job Title]
+     Salutation Line: Dear [Hiring Manager and/or Hiring Team, e.g. Dear Andrew Phelan and the Moonshot Labs Hiring Team,]
+     Body Paragraphs: 3-4 paragraphs of tailored body text.
+     Sign-off: Sincerely,\n\nBhagath Siddi
+   - Output this formatting directly inside the "cover_letter" JSON property.
+
+4. Compute an ATS Match Score (0 to 100) reflecting the match percentage. Since your task is to successfully tailor the resume, your final tailored content should achieve a score of 90 or higher.
+5. Extract the jobTitle and companyName from the job description or page details.
+6. Provide a list of at most 10-15 most critical matching keywords (an array of strings) and a detailed match analysis explaining how the candidate's transferable skills were mapped to the job requirements.
 
 Format the output strictly as a JSON object matching this schema:
 {{
@@ -313,6 +398,7 @@ Format the output strictly as a JSON object matching this schema:
   "analysis": "string detailing matches and gaps",
   "summary": "LaTeX summary text",
   "competencies": "LaTeX competencies block containing the items",
+  "cover_letter": "formatted cover letter text",
   "keywords": ["string"]
 }}
 """
@@ -337,12 +423,13 @@ Format the output strictly as a JSON object matching this schema:
                             "analysis": {"type": "STRING"},
                             "summary": {"type": "STRING"},
                             "competencies": {"type": "STRING"},
+                            "cover_letter": {"type": "STRING"},
                             "keywords": {
                                 "type": "ARRAY",
                                 "items": {"type": "STRING"}
                             }
                         },
-                        "required": ["jobTitle", "companyName", "atsScore", "analysis", "summary", "competencies", "keywords"]
+                        "required": ["jobTitle", "companyName", "atsScore", "analysis", "summary", "competencies", "cover_letter", "keywords"]
                     }
                 }
             }
@@ -361,8 +448,19 @@ Format the output strictly as a JSON object matching this schema:
 
         # PASS 2: Double-Validation and Optimization Sweep
         print("--- Initiating Pass 2: Strict Double-Validation Sweep ---")
+        
+        # Clean Draft values for Pass 2 to avoid propagating LLM formatting junk
+        draft_summary = clean_latex(parsed_result.get("summary", ""), rules, is_competencies=False)
+        draft_summary = substitute_forbidden_words(draft_summary, rules)
+        
+        draft_competencies = clean_latex(parsed_result.get("competencies", ""), rules, is_competencies=True)
+        draft_competencies = substitute_forbidden_words(draft_competencies, rules)
+
+        draft_cover_letter = clean_latex(parsed_result.get("cover_letter", ""), rules, is_cover_letter=True)
+        draft_cover_letter = substitute_forbidden_words(draft_cover_letter, rules)
+
         prompt_pass2 = f"""
-You are a strict ATS compliance editor and resume optimizer. Your task is to perform a second validation pass on the draft resume summary and competencies to ensure they are fully tailored to the target job and that the ATS Match Score is 90% or higher.
+You are a strict ATS compliance editor, resume optimizer, and cover letter writer. Your task is to perform a second validation pass on the draft resume summary, competencies, and cover letter to ensure they are fully tailored to the target job and that the ATS Match Score is 90% or higher.
 
 Job Description:
 \"\"\"
@@ -378,13 +476,19 @@ Candidate Base Resume Profile:
 
 DRAFT Tailored Summary:
 \"\"\"
-{parsed_result.get("summary")}
+{draft_summary}
 \"\"\"
 
 DRAFT Tailored Competencies:
 \"\"\"
-{parsed_result.get("competencies")}
+{draft_competencies}
 \"\"\"
+
+DRAFT Tailored Cover Letter:
+\"\"\"
+{draft_cover_letter}
+\"\"\"
+
 
 Your tasks:
 1. Audit the draft summary and competencies against the target job description. Identify any missing keywords or requirements (e.g., specific technologies like Node.js, React, AWS, GCP, or domains like e-commerce, loyalty, CRM).
@@ -392,9 +496,10 @@ Your tasks:
 3. Ensure that any irrelevant domain jargon (like 'clinical' or 'healthcare') is completely stripped out unless the target job is in the healthcare industry.
 4. Verify that the summary is a single cohesive paragraph of no more than {summary_sentences_max} sentences.
 5. Verify that there are exactly {competencies_count} core competency items, and that their descriptions are highly concise (at most 1-2 sentences each) to respect the absolute 1-page budget.
-6. Re-evaluate the ATS match score (0-100). The final score must be 90 or higher, reflecting the optimized alignment.
-7. Verify and preserve the jobTitle: "{parsed_result.get("jobTitle")}" and companyName: "{parsed_result.get("companyName")}".
-8. Provide a list of at most 10-15 most critical matching keywords (an array of strings) to keep the appended ATS target block concise and prevent layout overflow.
+6. Review and optimize the cover letter text, keeping it highly tailored, professional, free of ampersands, and correctly structured with recipient, location, subject, salutation, body paragraphs, and professional closing sign-off. Ensure the recipient line, location line, subject line, and salutation line are each separated by double newlines at the start.
+7. Re-evaluate the ATS match score (0-100). The final score must be 90 or higher, reflecting the optimized alignment.
+8. Verify and preserve the jobTitle: "{parsed_result.get("jobTitle")}" and companyName: "{parsed_result.get("companyName")}".
+9. Provide a list of at most 10-15 most critical matching keywords (an array of strings) to keep the appended ATS target block concise and prevent layout overflow.
 
 Format the output strictly as a JSON object matching this schema:
 {{
@@ -404,6 +509,7 @@ Format the output strictly as a JSON object matching this schema:
   "analysis": "string detailing finalized matches and gaps",
   "summary": "LaTeX summary text",
   "competencies": "LaTeX competencies block containing the items",
+  "cover_letter": "formatted cover letter text",
   "keywords": ["string"]
 }}
 """
@@ -424,12 +530,13 @@ Format the output strictly as a JSON object matching this schema:
                             "analysis": {"type": "STRING"},
                             "summary": {"type": "STRING"},
                             "competencies": {"type": "STRING"},
+                            "cover_letter": {"type": "STRING"},
                             "keywords": {
                                 "type": "ARRAY",
                                 "items": {"type": "STRING"}
                             }
                         },
-                        "required": ["jobTitle", "companyName", "atsScore", "analysis", "summary", "competencies", "keywords"]
+                        "required": ["jobTitle", "companyName", "atsScore", "analysis", "summary", "competencies", "cover_letter", "keywords"]
                     }
                 }
             }
@@ -452,6 +559,9 @@ Format the output strictly as a JSON object matching this schema:
         
         competencies = clean_latex(parsed_result.get("competencies", ""), rules, is_competencies=True)
         competencies = substitute_forbidden_words(competencies, rules)
+
+        cover_letter = clean_latex(parsed_result.get("cover_letter", ""), rules, is_cover_letter=True)
+        cover_letter = substitute_forbidden_words(cover_letter, rules)
 
         keywords = parsed_result.get("keywords", [])
 
@@ -500,9 +610,23 @@ Format the output strictly as a JSON object matching this schema:
             template_content = template_content.replace(f"\\begin{{{env}}}", "{")
             template_content = template_content.replace(f"\\end{{{env}}}", "\\par}")
 
-        # 5. Inject summary & competencies
+        # 5. Inject role, summary, competencies & dynamic historical experience titles
+        role_title = parsed_result.get("jobTitle", "DIRECTOR OF AI ENGINEERING | STRATEGY & ENTERPRISE ML LIFE-CYCLE").upper()
+        role_title_escaped = clean_latex(role_title, rules)
+        role_title_escaped = substitute_forbidden_words(role_title_escaped, rules)
+        template_content = template_content.replace('%TOKEN_ROLE_ZONE%', role_title_escaped)
         template_content = template_content.replace('%TOKEN_SUMMARY_ZONE%', summary)
         template_content = template_content.replace('%TOKEN_COMPETENCIES_ZONE%', competencies)
+
+        # Dynamic Experience Titles replacement based on target jobTitle seniority
+        title_7eleven, title_cvs = get_historical_titles(role_title)
+        title_7eleven_escaped = clean_latex(title_7eleven, rules)
+        title_7eleven_escaped = substitute_forbidden_words(title_7eleven_escaped, rules)
+        title_cvs_escaped = clean_latex(title_cvs, rules)
+        title_cvs_escaped = substitute_forbidden_words(title_cvs_escaped, rules)
+        
+        template_content = template_content.replace('%TOKEN_7ELEVEN_TITLE_ZONE%', title_7eleven_escaped)
+        template_content = template_content.replace('%TOKEN_CVS_TITLE_ZONE%', title_cvs_escaped)
 
         # 6. Inject ATS Strategy target block
         ats_target = rules.get("ats_target_block", {})
@@ -537,6 +661,35 @@ Format the output strictly as a JSON object matching this schema:
         
         result = subprocess.run(tectonic_cmd, shell=True, capture_output=True, text=True)
         
+        # Compile cover letter if generated
+        cl_pdf_path = ""
+        cl_tex_path = ""
+        if cover_letter:
+            cover_letter_template_path = "cover_letter_template.tex"
+            if os.path.exists(cover_letter_template_path):
+                with open(cover_letter_template_path, 'r') as f:
+                    cl_content = f.read()
+                
+                cl_content = cl_content.replace('%TOKEN_COVER_LETTER_ZONE%', cover_letter)
+                
+                cl_base_filename = f"cover_letter_{company_name_norm}_{job_title_norm}"
+                cl_tex_path = os.path.join(output_dir, f"{cl_base_filename}.tex")
+                cl_pdf_path = os.path.join(output_dir, f"{cl_base_filename}.pdf")
+                
+                with open(cl_tex_path, 'w') as f:
+                    f.write(cl_content)
+                print(f"Saved Cover Letter LaTeX output to: {cl_tex_path}")
+                
+                cl_cmd = f'{tectonic_exec} -o "{output_dir}" "{cl_tex_path}"'
+                print(f"Executing Cover Letter compilation: {cl_cmd}")
+                cl_res = subprocess.run(cl_cmd, shell=True, capture_output=True, text=True)
+                if cl_res.returncode == 0:
+                    print("Cover Letter compiled successfully.")
+                else:
+                    print("Cover Letter compilation failed:")
+                    print("Stdout:", cl_res.stdout)
+                    print("Stderr:", cl_res.stderr)
+
         if result.returncode != 0:
             print("LaTeX compilation failed:")
             print("Stdout:", result.stdout)
@@ -552,7 +705,8 @@ Format the output strictly as a JSON object matching this schema:
                     "companyName": parsed_result.get("companyName"),
                     "analysis": parsed_result.get("analysis"),
                     "summary": summary,
-                    "competencies": competencies
+                    "competencies": competencies,
+                    "coverLetter": cover_letter
                 }
             )
 
@@ -580,6 +734,7 @@ Format the output strictly as a JSON object matching this schema:
             "analysis": parsed_result.get("analysis"),
             "summary": summary,
             "competencies": competencies,
+            "coverLetter": cover_letter,
             "jobDescription": job_description,
             "date": subprocess.check_output("date -Iseconds", shell=True).decode().strip()
         }
@@ -599,7 +754,9 @@ Format the output strictly as a JSON object matching this schema:
             "analysis": parsed_result.get("analysis"),
             "summary": summary,
             "competencies": competencies,
-            "pdfPath": pdf_path
+            "coverLetter": cover_letter,
+            "pdfPath": pdf_path,
+            "clPdfPath": cl_pdf_path
         }
 
     except Exception as e:

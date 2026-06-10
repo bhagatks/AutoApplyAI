@@ -100,19 +100,32 @@ document.addEventListener('DOMContentLoaded', async () => {
     stepAi.classList.add('active');
 
     try {
-      const res = await fetch('http://localhost:3000/api/analyze-job', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          jobDescription: jobDescription,
-          jobUrl: activeTab.url
-        })
-      });
+      let res;
+      try {
+        res = await fetch('http://localhost:3000/api/analyze-job', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            jobDescription: jobDescription,
+            jobUrl: activeTab.url
+          })
+        });
+      } catch (fetchErr) {
+        console.log('Port 3000 fetch failed, trying port 8000 (Docker)...', fetchErr);
+        res = await fetch('http://localhost:8000/api/analyze-job', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            jobDescription: jobDescription,
+            jobUrl: activeTab.url
+          })
+        });
+      }
 
       const data = await res.json();
 
       if (!res.ok) {
-        throw new Error(data.error || 'Server returned an error');
+        throw new Error(data.error || data.detail || 'Server returned an error');
       }
 
       stepAi.classList.remove('active');

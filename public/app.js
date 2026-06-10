@@ -27,6 +27,7 @@ document.addEventListener('DOMContentLoaded', () => {
   const analysisContent = document.getElementById('analysisContent');
   const summaryText = document.getElementById('summaryText');
   const competenciesText = document.getElementById('competenciesText');
+  const coverLetterText = document.getElementById('coverLetterText');
   const latexText = document.getElementById('latexText');
   
   // Tab Elements
@@ -461,7 +462,7 @@ document.addEventListener('DOMContentLoaded', () => {
           }
         }, 150);
       } else {
-        alert('Error: ' + data.error);
+        alert('Error: ' + (data.error || data.detail || 'Server error'));
       }
     } catch (err) {
       alert('Failed to analyze job: ' + err.message);
@@ -506,6 +507,7 @@ document.addEventListener('DOMContentLoaded', () => {
     // Populate text previews
     summaryText.innerText = data.summary || '';
     competenciesText.innerText = data.competencies || '';
+    coverLetterText.innerText = data.coverLetter || '';
     
     // Assemble preview of compiled LaTeX (replace placeholders on client side for display)
     // To give user nice context

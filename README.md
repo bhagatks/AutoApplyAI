@@ -53,16 +53,16 @@ docker build -t resume-pipeline-bot .
 ```
 
 #### 3. Run the Container
-Start the container, passing your Gemini API Key as an environment variable and mapping the host's `Downloads` folder to receive the generated resume PDFs:
+Start the container. We map the host's `config.json` directly into the container so that API keys can be configured and updated persistently via the dashboard settings modal without passing secrets in the command line:
 ```bash
 docker run -d \
   -p 8000:8000 \
-  -e GEMINI_API_KEY="YOUR_GEMINI_API_KEY" \
+  -v $(pwd)/config.json:/app/config.json \
   -v ~/Downloads:/app/output \
   --name resume-bot-instance \
   resume-pipeline-bot
 ```
-*Note: The server automatically detects that it is running inside Docker, sets output targets to the mapped volume `/app/output`, and safely bypasses native Mac folder-opening alerts.*
+*Note: Make sure you have created your `config.json` file in the root directory on the host Mac before running this command. The server automatically detects that it is running inside Docker, sets output targets to the mapped volume `/app/output`, and safely bypasses native Mac folder-opening alerts.*
 
 ---
 

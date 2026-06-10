@@ -170,6 +170,7 @@
             <div class="tab-header">
               <button class="tab-btn active" data-tab="summary">Tailored Summary</button>
               <button class="tab-btn" data-tab="competencies">Tailored Competencies</button>
+              <button class="tab-btn" data-tab="cover-letter">Tailored Cover Letter</button>
               <button class="tab-btn" data-tab="latex">Generated LaTeX Output</button>
             </div>
             <div class="tab-content-container">
@@ -194,6 +195,19 @@
                     <button class="copy-btn" data-copy="competenciesText">Copy</button>
                   </div>
                   <div id="competenciesText" class="preview-text">
+                    <!-- Loaded dynamically -->
+                  </div>
+                </div>
+              </div>
+
+              <!-- Cover Letter Tab -->
+              <div id="tab-cover-letter" class="tab-content">
+                <div class="text-preview-box">
+                  <div class="preview-header">
+                    <span>Cover Letter Text</span>
+                    <button class="copy-btn" data-copy="coverLetterText">Copy</button>
+                  </div>
+                  <div id="coverLetterText" class="preview-text">
                     <!-- Loaded dynamically -->
                   </div>
                 </div>
