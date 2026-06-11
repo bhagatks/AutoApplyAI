@@ -47,6 +47,10 @@ const DEFAULT_RULES: ResumeRules = {
 };
 
 // Handle extension icon clicks by opening the sidepanel
+chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: true }).catch((err: any) => {
+  console.error("Failed to set sidepanel behavior at top-level:", err);
+});
+
 chrome.runtime.onInstalled.addListener(() => {
   chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: true }).catch((err: any) => {
     console.error("Failed to set sidepanel behavior:", err);
@@ -219,5 +223,57 @@ chrome.runtime.onMessage.addListener((message: any, sender: chrome.runtime.Messa
 
     sendResponse({ success: true });
     return true; // keep channel open
+  }
+});
+
+// External message listener for Google Auth Success from dashboard
+chrome.runtime.onMessageExternal.addListener((message: any, _sender: chrome.runtime.MessageSender, sendResponse: (response?: any) => void) => {
+  if (message && message.action === 'GOOGLE_AUTH_SUCCESS') {
+    const { uid, token, profile } = message;
+    const basicUserConfig = {
+      uid: uid || '',
+      token: token || '',
+      profile: {
+        firstName: profile?.firstName || '',
+        lastName: profile?.lastName || '',
+        email: profile?.email || ''
+      }
+    };
+
+    chrome.storage.local.set({ basic_user_config: basicUserConfig }, () => {
+      sendResponse({ success: true });
+
+      // Keep tab open for debugging and log inspection
+      console.log('[DEBUG LOG] Received GOOGLE_AUTH_SUCCESS in background. Tab left open for console inspection.');
+      /*
+      if (sender.tab && sender.tab.id) {
+        chrome.tabs.remove(sender.tab.id).catch(() => {});
+      }
+      */
+    });
+    return true; // Keep channel open for async sendResponse
+  }
+
+  if (message && message.action === 'GOOGLE_AUTH_SIGNOUT') {
+    chrome.storage.local.remove(['basic_user_config', 'userId'], () => {
+      sendResponse({ success: true });
+    });
+    return true;
+  }
+});
+
+// Gracefully handle uncaught promise rejections in the background service worker
+self.addEventListener('unhandledrejection', (event: any) => {
+  const reason = event.reason;
+  if (
+    reason &&
+    (reason.name === 'FirebaseError' ||
+      (reason.message &&
+        (reason.message.toLowerCase().includes('offline') ||
+          reason.message.toLowerCase().includes('network') ||
+          reason.message.toLowerCase().includes('auth/internal-error'))))
+  ) {
+    console.warn('Background service worker handled offline/network promise rejection gracefully:', reason.message || reason);
+    event.preventDefault();
   }
 });

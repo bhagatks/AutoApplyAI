@@ -13,6 +13,8 @@ async function runBuilds() {
     build: {
       outDir: 'dist',
       emptyOutDir: true,
+      sourcemap: true,
+      minify: false,
       rollupOptions: {
         input: {
           dashboard: resolve(__dirname, 'index.html'),
@@ -33,6 +35,8 @@ async function runBuilds() {
     build: {
       outDir: 'dist',
       emptyOutDir: false,
+      sourcemap: true,
+      minify: false,
       lib: {
         entry: resolve(__dirname, 'src/background/index.ts'),
         name: 'background',
@@ -53,6 +57,8 @@ async function runBuilds() {
     build: {
       outDir: 'dist',
       emptyOutDir: false,
+      sourcemap: true,
+      minify: false,
       lib: {
         entry: resolve(__dirname, 'src/content/index.ts'),
         name: 'content',

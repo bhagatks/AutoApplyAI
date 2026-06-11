@@ -178,7 +178,7 @@ export function injectTokensIntoTemplate(
   const cleanFirstName = cleanLatex(profile.firstName || 'Bhagath', rules);
   const cleanLastName = cleanLatex(profile.lastName || 'Siddi', rules);
   const cleanEmail = cleanLatex(profile.email || 'bhagathsiddi@gmail.com', rules);
-  const cleanPhone = cleanLatex(profile.phone || '989-312-3420', rules);
+  const cleanPhone = cleanLatex(profile.phone || '555-555-5555', rules);
   const cleanLocation = cleanLatex(profile.location || 'Prosper, TX 75078', rules);
   const cleanLinkedin = cleanLatex(profile.linkedin || 'linkedin.com/in/bhagathsiddi', rules);
   

@@ -70,3 +70,22 @@ export interface UserSettings {
   geminiApiKey: string;
   resumeRulesJson: string;
 }
+
+export interface CloudApiKeyDoc {
+  encrypted: boolean;
+  key: string;
+}
+
+export interface CustomerConfig {
+  customerId: string;
+  geminiApiKey: string;
+  outputDir: string;
+  candidateProfile: {
+    firstName: string;
+    lastName: string;
+    email: string;
+    phone: string;
+    resume: string;
+  };
+}
+
