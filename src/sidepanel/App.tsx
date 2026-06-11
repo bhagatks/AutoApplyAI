@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   Settings,
   Plus,
@@ -13,17 +13,16 @@ import {
   Eye,
   EyeOff,
   Sparkles,
-  RefreshCw,
-  ExternalLink
+  RefreshCw
 } from 'lucide-react';
 
 import { Job, ResumeRules, BaseProfile, CustomerConfig } from '../shared/types';
 import { getHistoricalTitles, cleanLatex, substituteForbiddenWords, injectTokensIntoTemplate, normalizeName } from '../shared/utils';
 import { runPass1Generate, runPass2Optimize } from '../shared/ai';
-import { subscribeToJobs, saveJobToDb, deleteJobFromDb, signInWithGoogleTokens, getUserProfile, auth, saveCloudApiKey, getCloudApiKey, saveCustomerConfig, getCustomerConfig } from '../shared/db';
+import { subscribeToJobs, saveJobToDb, deleteJobFromDb, signInWithGoogleTokens, signInWithChromeToken, getUserProfile, auth, saveCloudApiKey, getCloudApiKey, saveCustomerConfig, getCustomerConfig } from '../shared/db';
 import { encryptKey, decryptKey } from '../shared/crypto';
 import { onAuthStateChanged, signOut, User } from 'firebase/auth';
-import { useState, useEffect } from 'react';
+import MicroOnboarding from './components/MicroOnboarding';
 import { loadLocalSettings, saveSettings, saveLocalHistory } from '../shared/storage';
 import { appConfig } from '../config/appConfig';
 import { BasicUserConfig } from '../config/types';
@@ -167,6 +166,21 @@ const BASE_LATEX_TEMPLATE = `% --- PACKAGED BASE RESUME TEMPLATE ---
 
 \\end{document}`;
 
+const isConfigComplete = (config: any): boolean => {
+  return !!(
+    config &&
+    config.customerId &&
+    config.geminiApiKey &&
+    config.outputDir &&
+    config.candidateProfile &&
+    config.candidateProfile.firstName &&
+    config.candidateProfile.lastName &&
+    config.candidateProfile.email &&
+    config.candidateProfile.phone &&
+    config.candidateProfile.resume
+  );
+};
+
 export default function App() {
   const [currentUser, setCurrentUser] = useState<User | null>(null);
   const [jobs, setJobs] = useState<Job[]>([]);
@@ -188,7 +202,6 @@ export default function App() {
   const [customerConfig, setCustomerConfig] = useState<CustomerConfig | null>(null);
   const [basicUserConfig, setBasicUserConfig] = useState<BasicUserConfig | null>(null);
   const [storageLoaded, setStorageLoaded] = useState(false);
-  const [linkSuccess, setLinkSuccess] = useState(false);
 
   // Settings Modal State
   const [showSettings, setShowSettings] = useState(false);
@@ -204,6 +217,21 @@ export default function App() {
   const [passphraseInput, setPassphraseInput] = useState('');
   const [encryptedKeyCiphertext, setEncryptedKeyCiphertext] = useState('');
   const [decryptionError, setDecryptionError] = useState('');
+
+  // Diagnostic Logs
+  const [debugLogs, setDebugLogs] = useState<string[]>([]);
+  const logDebug = (msg: string, ...args: any[]) => {
+    const formatted = msg + (args.length ? ' ' + args.map(a => typeof a === 'object' ? JSON.stringify(a) : String(a)).join(' ') : '');
+    console.log('[DEBUG]', formatted);
+    setDebugLogs(prev => [...prev.slice(-49), `[${new Date().toLocaleTimeString()}] ${formatted}`]);
+  };
+
+  // State to track if the user has completed onboarding for the active login session
+  const [isLoggedInFlag, setIsLoggedInFlag] = useState(false);
+  // State to track if sign-in is currently processing
+  const [isSigningIn, setIsSigningIn] = useState(false);
+  // Ref to track if we are in the middle of a sign-out to prevent race conditions during Firebase auth state changes
+  const isSigningOutRef = useRef(false);
 
   const openSettings = () => {
     setDraftProfile({ ...candidateProfile });
@@ -229,7 +257,10 @@ export default function App() {
       if (res.candidateProfile) setCandidateProfile(res.candidateProfile);
     });
 
-    chrome.storage.local.get(['customer_config', 'basic_user_config'], (res) => {
+    chrome.storage.local.get(['customer_config', 'basic_user_config', 'is_logged_in'], (res) => {
+      if (res.is_logged_in) {
+        setIsLoggedInFlag(true);
+      }
       if (res.customer_config) {
         const config = res.customer_config;
         const isComplete = !!(
@@ -287,7 +318,20 @@ export default function App() {
             if (cloudConfig) {
               setCustomerConfig(cloudConfig);
               setApiKey(cloudConfig.geminiApiKey);
-              chrome.storage.local.set({ customer_config: cloudConfig });
+              
+              const isComplete = isConfigComplete(cloudConfig);
+              if (isComplete) {
+                chrome.storage.local.set({ 
+                  customer_config: cloudConfig,
+                  is_logged_in: true 
+                }, () => {
+                  logDebug('Cloud config is complete. Auto-skipping onboarding.');
+                  setIsLoggedInFlag(true);
+                });
+              } else {
+                chrome.storage.local.set({ customer_config: cloudConfig });
+              }
+
               if (cloudConfig.candidateProfile) {
                 setCandidateProfile(prev => ({
                   ...prev,
@@ -338,11 +382,18 @@ export default function App() {
         } else {
           setConfigLoading(false);
           chrome.storage.local.remove('userId');
-          // Reload local history if signed out
-          loadLocalSettings().then((res) => {
-            setJobs(res.localHistory || []);
-            setCandidateProfile(res.candidateProfile || DEFAULT_PROFILE);
-          });
+          if (isSigningOutRef.current) {
+            logDebug('Sign-out in progress. Bypassing reloading local settings.');
+            isSigningOutRef.current = false;
+            setJobs([]);
+            setCandidateProfile(DEFAULT_PROFILE);
+          } else {
+            // Reload local history if signed out normally (e.g., startup / sync)
+            loadLocalSettings().then((res) => {
+              setJobs(res.localHistory || []);
+              setCandidateProfile(res.candidateProfile || DEFAULT_PROFILE);
+            });
+          }
         }
       });
 
@@ -431,18 +482,8 @@ export default function App() {
 
     try {
       chrome.runtime.onMessageExternal.addListener(handleExternalMessage);
-      // Listen for link success messages
-      const linkListener = (msg: any) => {
-        if (msg.type === 'LINK_SUCCESS') {
-          setLinkSuccess(true);
-          // Auto-hide after 5 seconds
-          setTimeout(() => setLinkSuccess(false), 5000);
-        }
-      };
-      chrome.runtime.onMessage.addListener(linkListener);
       return () => {
         chrome.runtime.onMessageExternal.removeListener(handleExternalMessage);
-        chrome.runtime.onMessage.removeListener(linkListener);
       };
     } catch (e) {
       console.warn('onMessageExternal not available in this context:', e);
@@ -454,16 +495,42 @@ export default function App() {
     if (!storageLoaded) return;
     if (basicUserConfig && basicUserConfig.token) {
       if (!currentUser || currentUser.uid !== basicUserConfig.uid) {
+        logDebug('Sync active: basicUserConfig token found, but currentUser is mismatched or null. Authenticating...');
         setAuthLoading(true);
-        signInWithGoogleTokens(basicUserConfig.token, null)
+        const isAccessToken = basicUserConfig.token.startsWith('ya29.');
+        const idToken = isAccessToken ? null : basicUserConfig.token;
+        const accessToken = isAccessToken ? basicUserConfig.token : null;
+        signInWithGoogleTokens(idToken, accessToken)
           .then((user) => {
             if (user) {
-              console.log("Successfully logged in extension via stored basicUserConfig token");
+              logDebug('Successfully logged in extension via stored basicUserConfig token.');
+              if (user.uid !== basicUserConfig.uid) {
+                logDebug('UID mismatch during sync. Updating basic_user_config with new UID:', user.uid);
+                const parts = (user.displayName || '').trim().split(/\s+/);
+                const updatedConfig = {
+                  ...basicUserConfig,
+                  uid: user.uid,
+                  profile: {
+                    firstName: parts[0] || basicUserConfig.profile?.firstName || '',
+                    lastName: parts.slice(1).join(' ') || basicUserConfig.profile?.lastName || '',
+                    email: user.email || basicUserConfig.profile?.email || ''
+                  }
+                };
+                chrome.storage.local.set({ basic_user_config: updatedConfig }, () => {
+                  setBasicUserConfig(updatedConfig);
+                });
+              }
             }
           })
           .catch((err) => {
-            console.error("Failed to sign in with stored token, clearing config:", err);
-            chrome.storage.local.remove(['basic_user_config', 'userId']);
+            logDebug('Failed to sign in with stored token, performing full session cleanup. Error:', err);
+            // If the token failed, also remove it from Chrome's cache if it's an access token
+            if (isAccessToken && typeof chrome !== 'undefined' && chrome.identity) {
+              chrome.identity.removeCachedAuthToken({ token: basicUserConfig.token }, () => {
+                logDebug('Cleared failed token from Chrome identity cache during sync failure.');
+              });
+            }
+            handleSignOut();
           })
           .finally(() => {
             setAuthLoading(false);
@@ -475,55 +542,200 @@ export default function App() {
         if (typeof chrome !== 'undefined' && chrome.storage && chrome.storage.local) {
           chrome.storage.local.get(['basic_user_config'], (res) => {
             if (!res.basic_user_config) {
-              console.log("No stored basicUserConfig found in storage. Logging out Firebase.");
-              if (auth) {
-                signOut(auth).then(() => {
-                  setCurrentUser(null);
-                });
-              }
+              logDebug('No stored basicUserConfig found in storage. Triggering full sign-out.');
+              handleSignOut();
             } else {
-              console.log("Stored config found in storage during sync, bypassing accidental logout.");
+              logDebug('Stored config found in storage during sync, bypassing accidental logout.');
             }
           });
         } else {
-          if (auth) {
-            signOut(auth).then(() => {
-              setCurrentUser(null);
-            });
-          }
+          logDebug('No chrome storage available. Triggering full sign-out.');
+          handleSignOut();
         }
       }
     }
   }, [basicUserConfig, currentUser, storageLoaded]);
 
   const handleGoogleSignIn = async () => {
+    if (isSigningIn) {
+      logDebug('Sign-in already in progress. Ignoring duplicate request.');
+      return;
+    }
     try {
-      const extId = chrome.runtime.id;
-      const authUrl = `${appConfig.DASHBOARD_URL}?origin=extension&extId=${extId}`;
-      
-      // Open a browser tab targeting the web dashboard for authentication to satisfy MV3 CSP
-      chrome.tabs.create({ url: authUrl });
+      logDebug('handleGoogleSignIn invoked. Fetching fresh token directly via user gesture.');
+      setIsSigningIn(true);
+      if (typeof chrome !== 'undefined' && chrome.identity) {
+        chrome.identity.getAuthToken({ interactive: true }, async (token) => {
+          if (chrome.runtime.lastError) {
+            const errMsg = chrome.runtime.lastError.message || 'Google Sign-In cancelled or failed.';
+            logDebug('chrome.runtime.lastError during getAuthToken:', errMsg);
+            alert('Authentication failed: ' + errMsg);
+            setIsSigningIn(false);
+            return;
+          }
+
+          if (!token) {
+            logDebug('No token returned by chrome.identity.getAuthToken.');
+            alert('Authentication failed: No token was returned.');
+            setIsSigningIn(false);
+            return;
+          }
+
+          logDebug('Token received:', token.substring(0, 15) + '...');
+          try {
+            // Sign in to Firebase using the native Chrome token
+            const user = await signInWithChromeToken(token);
+            if (user) {
+              logDebug('Firebase Sign-in successful for UID:', user.uid);
+              const parts = (user.displayName || '').trim().split(/\s+/);
+              const basicConfig = {
+                uid: user.uid,
+                token: token,
+                profile: {
+                  firstName: parts[0] || '',
+                  lastName: parts.slice(1).join(' ') || '',
+                  email: user.email || ''
+                }
+              };
+              
+              chrome.storage.local.set({ basic_user_config: basicConfig }, () => {
+                logDebug('basic_user_config saved to storage.');
+                setBasicUserConfig(basicConfig);
+                logDebug('Direct Google Sign-in complete.');
+                setIsSigningIn(false);
+              });
+            } else {
+              logDebug('signInWithChromeToken returned null user.');
+              alert('Failed to link native auth token to Firebase.');
+              setIsSigningIn(false);
+            }
+          } catch (err: any) {
+            logDebug('Firebase Auth error during sign-in:', err);
+            // Clear the token from cache immediately so it's not reused on next click
+            if (chrome.identity && token) {
+              chrome.identity.removeCachedAuthToken({ token }, () => {
+                logDebug('Cleared invalid token from Chrome cache.');
+              });
+            }
+            alert('Firebase Login Error: ' + err.message);
+            setIsSigningIn(false);
+          }
+        });
+      } else {
+        logDebug('chrome.identity is not available in this context.');
+        alert('Google Sign-In is only available within the Chrome Extension environment.');
+        setIsSigningIn(false);
+      }
     } catch (e: any) {
-      console.error('Failed to open Google Auth browser tab:', e);
-      alert('Google Sign-In failed to start. Please verify extension permissions.');
+      logDebug('Failed to initiate Google Sign-In:', e);
+      alert('Google Sign-In initialization failed: ' + e.message);
+      setIsSigningIn(false);
     }
   };
 
-  const handleSignOut = () => {
+  const handleSignOut = async () => {
+    logDebug('handleSignOut triggered. Wiping session and storage.');
+    isSigningOutRef.current = true;
+
+    const tokenToClear = basicUserConfig?.token;
+
+    // Reset React States immediately for UI responsiveness
+    setCurrentUser(null);
+    setCustomerConfig(null);
+    setBasicUserConfig(null);
+    setApiKey('');
+    setCustomRules(JSON.stringify(DEFAULT_RULES, null, 2));
+    setCandidateProfile(DEFAULT_PROFILE);
+    setDraftProfile(DEFAULT_PROFILE);
+    setJobs([]);
+    setSelectedJob(null);
+    setIsLoggedInFlag(false);
+
     if (auth) {
-      signOut(auth).then(() => {
-        setCurrentUser(null);
-        chrome.storage.local.remove(['basic_user_config', 'userId'], () => {
-          const dashboardUrlPattern = `${appConfig.DASHBOARD_URL.replace(/\/login$/, '')}/*`;
-          chrome.tabs.query({ url: dashboardUrlPattern }, (tabs) => {
-            tabs.forEach((tab) => {
-              if (tab.id) {
-                chrome.tabs.sendMessage(tab.id, { action: 'SIGN_OUT' }).catch(() => {});
-              }
+      try {
+        await signOut(auth);
+        logDebug('Signed out of Firebase Auth.');
+      } catch (err) {
+        logDebug('Sign out error:', err);
+      }
+    }
+
+    // 1. Revoke active token if it exists in storage/state
+    if (tokenToClear) {
+      logDebug('Clearing access token from Chrome...');
+      try {
+        fetch(`https://oauth2.googleapis.com/revoke?token=${tokenToClear}`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/x-www-form-urlencoded'
+          }
+        })
+        .then(r => logDebug('Google server token revocation response status:', r.status))
+        .catch(err => logDebug('Failed to revoke Google token:', err));
+      } catch (err) {
+        logDebug('Failed to fetch token revocation:', err);
+      }
+
+      // 2. Remove token from Chrome's cache
+      if (typeof chrome !== 'undefined' && chrome.identity) {
+        try {
+          chrome.identity.removeCachedAuthToken({ token: tokenToClear }, () => {
+            logDebug('Removed token from Chrome identity cache.');
+          });
+        } catch (e) {
+          logDebug('Failed to remove cached token:', e);
+        }
+      }
+    } else {
+      logDebug('No active basicUserConfig token found in state to revoke.');
+    }
+
+    // 3. Query and clear any active cached token directly from Chrome identity (redundancy)
+    if (typeof chrome !== 'undefined' && chrome.identity) {
+      try {
+        chrome.identity.getAuthToken({ interactive: false }, (cachedToken) => {
+          // Access lastError synchronously to acknowledge/handle any errors and prevent the "Unchecked runtime.lastError" exception
+          if (chrome.runtime.lastError) {
+            logDebug('Silent check during signout returned info/error:', chrome.runtime.lastError.message);
+          }
+          if (cachedToken) {
+            logDebug('Found cached token via interactive:false during signout. Removing it.');
+            chrome.identity.removeCachedAuthToken({ token: cachedToken }, () => {
+              logDebug('Successfully removed cached token directly.');
             });
+          }
+        });
+      } catch (e) {
+        logDebug('Failed to query/clear active cached tokens directly:', e);
+      }
+    }
+
+    // 4. Clear all Chrome storage keys
+    if (typeof chrome !== 'undefined' && chrome.storage && chrome.storage.local) {
+      chrome.storage.local.clear(() => {
+        logDebug('chrome.storage.local cleared successfully.');
+        chrome.storage.local.set({ is_logged_in: false }, () => {
+          logDebug('is_logged_in set to false in storage.');
+        });
+        
+        // Notify dashboard tabs
+        const dashboardUrlPattern = `${appConfig.DASHBOARD_URL.replace(/\/login$/, '')}/*`;
+        chrome.tabs.query({ url: dashboardUrlPattern }, (tabs) => {
+          tabs.forEach((tab) => {
+            if (tab.id) {
+              chrome.tabs.sendMessage(tab.id, { action: 'SIGN_OUT' }).catch(() => {});
+            }
           });
         });
       });
+    }
+
+    // Also clear localStorage just in case of fallbacks
+    try {
+      localStorage.clear();
+      console.log('[DEBUG LOG] localStorage cleared successfully.');
+    } catch (e) {
+      console.warn('[DEBUG LOG] Failed to clear localStorage:', e);
     }
   };
 
@@ -1094,20 +1306,7 @@ ${job.coverLetter}
     );
   }
 
-  const isConfigComplete = (config: any): boolean => {
-    return !!(
-      config &&
-      config.customerId &&
-      config.geminiApiKey &&
-      config.outputDir &&
-      config.candidateProfile &&
-      config.candidateProfile.firstName &&
-      config.candidateProfile.lastName &&
-      config.candidateProfile.email &&
-      config.candidateProfile.phone &&
-      config.candidateProfile.resume
-    );
-  };
+
 
   if (!currentUser) {
     return (
@@ -1123,173 +1322,108 @@ ${job.coverLetter}
             </p>
           </div>
 
-          <div style={{ borderTop: '1px solid var(--panel-border)', paddingTop: 16 }}>
+          <div style={{ borderTop: '1px solid var(--panel-border)', paddingTop: 16, display: 'flex', flexDirection: 'column', gap: 10 }}>
             <button 
               onClick={handleGoogleSignIn} 
+              disabled={isSigningIn}
               className="btn btn-primary" 
-              style={{ width: '100%', padding: '12px', borderRadius: 8, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 10, fontSize: '0.9rem' }}
+              style={{ width: '100%', padding: '12px', borderRadius: 8, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 10, fontSize: '0.9rem', opacity: isSigningIn ? 0.7 : 1, cursor: isSigningIn ? 'not-allowed' : 'pointer' }}
             >
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
-                <path d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" fill="#4285F4"/>
-                <path d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" fill="#34A853"/>
-                <path d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.06H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.94l2.85-2.22.81-.63z" fill="#FBBC05"/>
-                <path d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84c.87-2.6 3.3-4.52 6.16-4.52z" fill="#EA4335"/>
-              </svg>
-              Sign in with Google
+              {isSigningIn ? (
+                <Loader className="animate-spin" size={18} />
+              ) : (
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
+                  <path d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" fill="#4285F4"/>
+                  <path d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" fill="#34A853"/>
+                  <path d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.06H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.94l2.85-2.22.81-.63z" fill="#FBBC05"/>
+                  <path d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84c.87-2.6 3.3-4.52 6.16-4.52z" fill="#EA4335"/>
+                </svg>
+              )}
+              {isSigningIn ? 'Signing in...' : 'Sign in with Google'}
+            </button>
+
+            <button 
+              onClick={() => {
+                const cloudDashboardUrl = 'https://autoapplyai-3e61d.web.app/login';
+                const extensionId = (typeof chrome !== 'undefined' && chrome.runtime && chrome.runtime.id) 
+                  ? chrome.runtime.id 
+                  : 'joojhlbjfhedimbnffedbgfipmehpmmh';
+                const targetUrl = `${cloudDashboardUrl}?origin=extension&extId=${extensionId}`;
+                logDebug('Opening cloud web dashboard fallback: ' + targetUrl);
+                if (typeof chrome !== 'undefined' && chrome.tabs) {
+                  chrome.tabs.create({ url: targetUrl });
+                } else {
+                  window.open(targetUrl, '_blank');
+                }
+              }}
+              className="btn btn-secondary" 
+              style={{ width: '100%', padding: '10px', borderRadius: 8, fontSize: '0.82rem', background: 'transparent', border: '1px solid var(--panel-border)', color: 'var(--text-secondary)' }}
+            >
+              Sign in via Web Dashboard (Fallback)
             </button>
           </div>
 
           <div style={{ color: 'var(--text-muted)', fontSize: '0.72rem', marginTop: 8 }}>
             By signing in, you agree to secure data backup under your Google Account on Cloud Firestore.
           </div>
+
+          <div style={{ marginTop: 12, textAlign: 'left', borderTop: '1px dashed var(--panel-border)', paddingTop: 12 }}>
+            <details>
+              <summary style={{ fontSize: '0.72rem', color: 'var(--text-secondary)', cursor: 'pointer', userSelect: 'none', fontWeight: 600 }}>
+                Diagnostic Debug Logs ({debugLogs.length})
+              </summary>
+              <div style={{ 
+                marginTop: 8, 
+                maxHeight: 180, 
+                overflowY: 'auto', 
+                background: '#f8fafc', 
+                border: '1px solid #e2e8f0', 
+                borderRadius: 6, 
+                padding: 10, 
+                fontFamily: 'monospace', 
+                fontSize: '0.68rem', 
+                color: '#334155',
+                whiteSpace: 'pre-wrap',
+                textAlign: 'left'
+              }}>
+                {debugLogs.length === 0 ? 'No logs captured yet. Try signing in/out.' : debugLogs.join('\n')}
+              </div>
+            </details>
+          </div>
         </div>
       </div>
     );
   }
 
-  if (!isConfigComplete(customerConfig)) {
-    const dashboardUrl = `${appConfig.DASHBOARD_URL}?origin=extension&extId=${chrome.runtime.id}`;
+  if (!isLoggedInFlag || !isConfigComplete(customerConfig)) {
     return (
-      <div style={{
-        display: 'flex',
-        flexDirection: 'column',
-        height: '100vh',
-        width: '100vw',
-        justifyContent: 'center',
-        alignItems: 'center',
-        background: 'var(--bg-color)',
-        padding: 24,
-        boxSizing: 'border-box',
-        textAlign: 'center',
-        color: 'var(--text-primary)'
-      }}>
-        <div className="detail-card" style={{
-          maxWidth: 400,
-          width: '100%',
-          padding: '40px 24px',
-          display: 'flex',
-          flexDirection: 'column',
-          gap: 24,
-          boxShadow: '0 20px 40px rgba(0,0,0,0.06)',
-          alignItems: 'center',
-          boxSizing: 'border-box'
-        }}>
-          <div style={{
-            display: 'inline-flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            width: 56,
-            height: 56,
-            borderRadius: 14,
-            background: 'var(--card-bg, rgba(255, 255, 255, 0.03))',
-            border: '1px solid var(--border-color, rgba(255, 255, 255, 0.08))',
-            boxShadow: '0 4px 20px rgba(0, 0, 0, 0.15)',
-            position: 'relative'
-          }}>
-            <Settings size={28} className="animate-spin" style={{ color: 'var(--brand-color)', animationDuration: '6s' }} />
-          </div>
-
-          <div>
-            <h2 style={{
-              fontFamily: 'var(--font-title)',
-              fontSize: '1.3rem',
-              fontWeight: 800,
-              background: 'linear-gradient(to right, var(--text-primary), var(--brand-color))',
-              WebkitBackgroundClip: 'text',
-              WebkitTextFillColor: 'transparent',
-              margin: '0 0 12px 0'
-            }}>
-              Onboarding Required
-            </h2>
-            <p style={{ color: 'var(--text-secondary)', fontSize: '0.85rem', margin: '0 0 16px 0', lineHeight: 1.5 }}>
-              Please complete your onboarding profile setup on the Web Dashboard to unlock the AutoApplyAI Chrome Extension features.
-            </p>
-          </div>
-
-          <button
-            onClick={() => chrome.tabs.create({ url: dashboardUrl })}
-            className="btn btn-primary"
-            style={{
-              width: '100%',
-              padding: '12px',
-              borderRadius: 8,
-              fontSize: '0.9rem',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              gap: 8,
-              cursor: 'pointer'
-            }}
-          >
-            <ExternalLink size={16} /> Configure Profile on Web
-          </button>
-
-          <button
-            onClick={async () => {
-              setIsRefreshing(true);
-              try {
-                const config = await getCustomerConfig(currentUser.uid);
-                if (config) {
-                  setCustomerConfig(config);
-                  setApiKey(config.geminiApiKey);
-                  if (config.candidateProfile) {
-                    setCandidateProfile(prev => ({
-                      ...prev,
-                      firstName: config.candidateProfile.firstName,
-                      lastName: config.candidateProfile.lastName,
-                      email: config.candidateProfile.email,
-                      phone: config.candidateProfile.phone
-                    }));
-                  }
-                  chrome.storage.local.set({ customer_config: config });
-                }
-              } catch (e) {
-                console.error("Manual config refresh failed:", e);
-              } finally {
-                setIsRefreshing(false);
-              }
-            }}
-            className="btn btn-outline"
-            style={{
-              width: '100%',
-              padding: '10px',
-              borderRadius: 8,
-              fontSize: '0.82rem',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              gap: 8,
-              border: '1px solid var(--border-color, rgba(255,255,255,0.1))',
-              background: 'transparent',
-              color: 'var(--text-secondary)',
-              cursor: 'pointer'
-            }}
-          >
-            <RefreshCw size={14} className={isRefreshing ? 'animate-spin' : ''} /> Check Onboarding Status
-          </button>
-
-          <button
-            onClick={async () => {
-              if (auth) {
-                await signOut(auth);
-                setCurrentUser(null);
-                chrome.storage.local.remove(['basic_user_config', 'userId', 'customer_config']);
-              }
-            }}
-            style={{
-              background: 'none',
-              border: 'none',
-              color: 'var(--text-muted)',
-              fontSize: '0.78rem',
-              cursor: 'pointer',
-              textDecoration: 'underline',
-              marginTop: 4
-            }}
-          >
-            Sign Out
-          </button>
-        </div>
-      </div>
+      <MicroOnboarding
+        userId={currentUser.uid}
+        initialProfile={{
+          email: currentUser.email || '',
+          firstName: currentUser.displayName?.split(/\s+/)[0] || '',
+          lastName: currentUser.displayName?.split(/\s+/).slice(1).join(' ') || ''
+        }}
+        initialConfig={customerConfig}
+        onComplete={(config) => {
+          chrome.storage.local.set({ is_logged_in: true }, () => {
+            logDebug('Onboarding completed, set is_logged_in to true in storage.');
+            setIsLoggedInFlag(true);
+          });
+          setCustomerConfig(config);
+          setApiKey(config.geminiApiKey);
+          if (config.candidateProfile) {
+            setCandidateProfile(prev => ({
+              ...prev,
+              firstName: config.candidateProfile.firstName || prev.firstName,
+              lastName: config.candidateProfile.lastName || prev.lastName,
+              email: config.candidateProfile.email || prev.email,
+              phone: config.candidateProfile.phone || prev.phone
+            }));
+          }
+        }}
+        onSignOut={handleSignOut}
+      />
     );
   }
 
@@ -1309,8 +1443,14 @@ ${job.coverLetter}
 
         <div className="header-actions">
           {!currentUser && (
-            <button onClick={handleGoogleSignIn} className="btn" style={{ padding: '6px 12px', fontSize: '0.78rem' }}>
-              <UserIcon size={14} /> Sync via Google
+            <button 
+              onClick={handleGoogleSignIn} 
+              disabled={isSigningIn}
+              className="btn" 
+              style={{ padding: '6px 12px', fontSize: '0.78rem', opacity: isSigningIn ? 0.7 : 1, cursor: isSigningIn ? 'not-allowed' : 'pointer', display: 'flex', alignItems: 'center', gap: 6 }}
+            >
+              {isSigningIn ? <Loader className="animate-spin" size={14} /> : <UserIcon size={14} />} 
+              {isSigningIn ? 'Syncing...' : 'Sync via Google'}
             </button>
           )}
 

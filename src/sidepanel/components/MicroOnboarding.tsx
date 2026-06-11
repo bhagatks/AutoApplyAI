@@ -6,31 +6,57 @@ import { saveCustomerConfig } from '../../shared/db';
 interface MicroOnboardingProps {
   userId: string;
   onComplete: (config: CustomerConfig) => void;
+  onSignOut?: () => void;
   initialProfile?: {
     firstName?: string;
     lastName?: string;
     email?: string;
   };
+  initialConfig?: CustomerConfig | null;
 }
 
-export default function MicroOnboarding({ userId, onComplete, initialProfile }: MicroOnboardingProps) {
-  const [firstName, setFirstName] = useState('');
-  const [lastName, setLastName] = useState('');
-  const [email, setEmail] = useState('');
-  const [phone, setPhone] = useState('');
-  const [geminiApiKey, setGeminiApiKey] = useState('');
-  const [outputDir, setOutputDir] = useState('/Users/bstar/Downloads/resume_backup/');
-  const [resumeFile, setResumeFile] = useState<string>('');
+export default function MicroOnboarding({ userId, onComplete, onSignOut, initialProfile, initialConfig }: MicroOnboardingProps) {
+  const [firstName, setFirstName] = useState(() => 
+    initialConfig?.candidateProfile?.firstName || initialProfile?.firstName || ''
+  );
+  const [lastName, setLastName] = useState(() => 
+    initialConfig?.candidateProfile?.lastName || initialProfile?.lastName || ''
+  );
+  const [email, setEmail] = useState(() => 
+    initialConfig?.candidateProfile?.email || initialProfile?.email || ''
+  );
+  const [phone, setPhone] = useState(() => 
+    initialConfig?.candidateProfile?.phone || ''
+  );
+  const [geminiApiKey, setGeminiApiKey] = useState(() => 
+    initialConfig?.geminiApiKey || ''
+  );
+  const [outputDir, setOutputDir] = useState(() => 
+    initialConfig?.outputDir || ''
+  );
+  const [resumeFile, setResumeFile] = useState<string>(() => 
+    initialConfig?.candidateProfile?.resume || ''
+  );
   const [loading, setLoading] = useState(false);
 
-  // Auto-populate from initialProfile if provided
+  // Auto-populate from props if provided
   useEffect(() => {
-    if (initialProfile) {
+    if (initialConfig) {
+      if (initialConfig.candidateProfile) {
+        setFirstName(initialConfig.candidateProfile.firstName || '');
+        setLastName(initialConfig.candidateProfile.lastName || '');
+        setEmail(initialConfig.candidateProfile.email || '');
+        setPhone(initialConfig.candidateProfile.phone || '');
+        setResumeFile(initialConfig.candidateProfile.resume || '');
+      }
+      setGeminiApiKey(initialConfig.geminiApiKey || '');
+      setOutputDir(initialConfig.outputDir || '');
+    } else if (initialProfile) {
       if (initialProfile.firstName) setFirstName(initialProfile.firstName);
       if (initialProfile.lastName) setLastName(initialProfile.lastName);
       if (initialProfile.email) setEmail(initialProfile.email);
     }
-  }, [initialProfile]);
+  }, [initialConfig, initialProfile]);
 
   // Read local configurations if already exists partially
   useEffect(() => {
@@ -206,7 +232,7 @@ export default function MicroOnboarding({ userId, onComplete, initialProfile }: 
           justifyContent: 'center',
           gap: 8
         }}>
-          <Settings size={20} style={{ color: 'var(--brand-color)' }} /> Micro Onboarding
+          <Settings size={20} style={{ color: 'var(--brand-color)' }} /> Onboarding
         </h2>
         <p style={{ color: 'var(--text-secondary)', fontSize: '0.85rem', margin: 0, lineHeight: 1.4 }}>
           Please complete configuration details to launch AutoApplyAI. All fields are mandatory.
@@ -286,13 +312,47 @@ export default function MicroOnboarding({ userId, onComplete, initialProfile }: 
           <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: '0.78rem', fontWeight: 600, color: 'var(--text-secondary)' }}>
             <Folder size={12} style={{ color: 'var(--brand-color)' }} /> Output Directory *
           </label>
-          <input
-            type="text"
-            className="form-control"
-            value={outputDir}
-            onChange={(e) => setOutputDir(e.target.value)}
-            required
-          />
+          <div style={{ display: 'flex', gap: 8 }}>
+            <input
+              type="text"
+              className="form-control"
+              value={outputDir}
+              placeholder="Select a directory..."
+              readOnly
+              onClick={async () => {
+                try {
+                  const handle = await (window as any).showDirectoryPicker();
+                  if (handle && handle.name) {
+                    setOutputDir(`/Users/bstar/Downloads/${handle.name}/`);
+                  }
+                } catch (err) {
+                  console.warn('Directory picker cancelled or not supported:', err);
+                }
+              }}
+              required
+              style={{ flex: 1, cursor: 'pointer' }}
+            />
+            <button
+              type="button"
+              className="btn"
+              onClick={async () => {
+                try {
+                  const handle = await (window as any).showDirectoryPicker();
+                  if (handle && handle.name) {
+                    setOutputDir(`/Users/bstar/Downloads/${handle.name}/`);
+                  }
+                } catch (err) {
+                  console.warn('Directory picker cancelled or not supported:', err);
+                }
+              }}
+              style={{ padding: '0 12px', whiteSpace: 'nowrap', fontSize: '0.8rem' }}
+            >
+              Choose...
+            </button>
+          </div>
+          <small style={{ color: 'var(--text-muted)', fontSize: '0.7rem', marginTop: 4, display: 'block' }}>
+            select a directory
+          </small>
         </div>
 
         <div className="form-group">
@@ -365,6 +425,25 @@ export default function MicroOnboarding({ userId, onComplete, initialProfile }: 
             </>
           )}
         </button>
+
+        {onSignOut && (
+          <button
+            type="button"
+            onClick={onSignOut}
+            style={{
+              background: 'none',
+              border: 'none',
+              color: 'var(--text-muted)',
+              fontSize: '0.78rem',
+              cursor: 'pointer',
+              textDecoration: 'underline',
+              marginTop: 16,
+              alignSelf: 'center'
+            }}
+          >
+            Sign Out
+          </button>
+        )}
       </form>
     </div>
   );

@@ -21,8 +21,17 @@
   },
   "host_permissions": [
     "https://*.linkedin.com/*",
+    "https://*.googleapis.com/*",
     "https://*.indeed.com/*"
   ],
+  "oauth2": {
+    "client_id": "214768128640-iltgm9frri1j2d9luvm6be4p5f6rgbqo.apps.googleusercontent.com",
+    "scopes": [
+      "email",
+      "profile",
+      "openid"
+    ]
+  },
   "background": {
     "service_worker": "background.js",
     "type": "module"

@@ -7118,6 +7118,45 @@ const Eye = createLucideIcon("Eye", [
  * This source code is licensed under the ISC license.
  * See the LICENSE file in the root directory of this source tree.
  */
+const FileText = createLucideIcon("FileText", [
+  ["path", { d: "M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z", key: "1rqfz7" }],
+  ["path", { d: "M14 2v4a2 2 0 0 0 2 2h4", key: "tnqrlb" }],
+  ["path", { d: "M10 9H8", key: "b1mrlr" }],
+  ["path", { d: "M16 13H8", key: "t4e002" }],
+  ["path", { d: "M16 17H8", key: "z1uh3a" }]
+]);
+/**
+ * @license lucide-react v0.330.0 - ISC
+ *
+ * This source code is licensed under the ISC license.
+ * See the LICENSE file in the root directory of this source tree.
+ */
+const Folder = createLucideIcon("Folder", [
+  [
+    "path",
+    {
+      d: "M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z",
+      key: "1kt360"
+    }
+  ]
+]);
+/**
+ * @license lucide-react v0.330.0 - ISC
+ *
+ * This source code is licensed under the ISC license.
+ * See the LICENSE file in the root directory of this source tree.
+ */
+const Key = createLucideIcon("Key", [
+  ["circle", { cx: "7.5", cy: "15.5", r: "5.5", key: "yqb3hr" }],
+  ["path", { d: "m21 2-9.6 9.6", key: "1j0ho8" }],
+  ["path", { d: "m15.5 7.5 3 3L22 7l-3-3", key: "1rn1fs" }]
+]);
+/**
+ * @license lucide-react v0.330.0 - ISC
+ *
+ * This source code is licensed under the ISC license.
+ * See the LICENSE file in the root directory of this source tree.
+ */
 const Loader = createLucideIcon("Loader", [
   ["line", { x1: "12", x2: "12", y1: "2", y2: "6", key: "gza1u7" }],
   ["line", { x1: "12", x2: "12", y1: "18", y2: "22", key: "1qhbu9" }],
@@ -7138,6 +7177,31 @@ const LogOut = createLucideIcon("LogOut", [
   ["path", { d: "M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4", key: "1uf3rs" }],
   ["polyline", { points: "16 17 21 12 16 7", key: "1gabdz" }],
   ["line", { x1: "21", x2: "9", y1: "12", y2: "12", key: "1uyos4" }]
+]);
+/**
+ * @license lucide-react v0.330.0 - ISC
+ *
+ * This source code is licensed under the ISC license.
+ * See the LICENSE file in the root directory of this source tree.
+ */
+const Mail = createLucideIcon("Mail", [
+  ["rect", { width: "20", height: "16", x: "2", y: "4", rx: "2", key: "18n3k1" }],
+  ["path", { d: "m22 7-8.97 5.7a1.94 1.94 0 0 1-2.06 0L2 7", key: "1ocrg3" }]
+]);
+/**
+ * @license lucide-react v0.330.0 - ISC
+ *
+ * This source code is licensed under the ISC license.
+ * See the LICENSE file in the root directory of this source tree.
+ */
+const Phone = createLucideIcon("Phone", [
+  [
+    "path",
+    {
+      d: "M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z",
+      key: "foiqr5"
+    }
+  ]
 ]);
 /**
  * @license lucide-react v0.330.0 - ISC
@@ -7213,6 +7277,17 @@ const Trash2 = createLucideIcon("Trash2", [
   ["path", { d: "M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2", key: "v07s0e" }],
   ["line", { x1: "10", x2: "10", y1: "11", y2: "17", key: "1uufr5" }],
   ["line", { x1: "14", x2: "14", y1: "11", y2: "17", key: "xtxkd" }]
+]);
+/**
+ * @license lucide-react v0.330.0 - ISC
+ *
+ * This source code is licensed under the ISC license.
+ * See the LICENSE file in the root directory of this source tree.
+ */
+const Upload = createLucideIcon("Upload", [
+  ["path", { d: "M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4", key: "ih7n3h" }],
+  ["polyline", { points: "17 8 12 3 7 8", key: "t8dd8p" }],
+  ["line", { x1: "12", x2: "12", y1: "3", y2: "15", key: "widbto" }]
 ]);
 /**
  * @license lucide-react v0.330.0 - ISC
@@ -28785,6 +28860,12 @@ if (defaultFirebaseConfig.apiKey) {
 } else {
   console.warn("Firebase apiKey is missing. Firebase features are disabled.");
 }
+async function signInWithChromeToken(token) {
+  if (!auth) return null;
+  const credential = GoogleAuthProvider.credential(null, token);
+  const userCredential = await signInWithCredential(auth, credential);
+  return userCredential.user;
+}
 async function signInWithGoogleTokens(idToken, accessToken) {
   if (!auth) return null;
   const credential = GoogleAuthProvider.credential(idToken, accessToken);
@@ -28952,29 +29033,473 @@ async function getCustomerConfig(userId) {
   }
   return null;
 }
+function MicroOnboarding({ userId, onComplete, onSignOut, initialProfile, initialConfig }) {
+  const [firstName, setFirstName] = reactExports.useState(
+    () => {
+      var _a;
+      return ((_a = initialConfig == null ? void 0 : initialConfig.candidateProfile) == null ? void 0 : _a.firstName) || (initialProfile == null ? void 0 : initialProfile.firstName) || "";
+    }
+  );
+  const [lastName, setLastName] = reactExports.useState(
+    () => {
+      var _a;
+      return ((_a = initialConfig == null ? void 0 : initialConfig.candidateProfile) == null ? void 0 : _a.lastName) || (initialProfile == null ? void 0 : initialProfile.lastName) || "";
+    }
+  );
+  const [email, setEmail] = reactExports.useState(
+    () => {
+      var _a;
+      return ((_a = initialConfig == null ? void 0 : initialConfig.candidateProfile) == null ? void 0 : _a.email) || (initialProfile == null ? void 0 : initialProfile.email) || "";
+    }
+  );
+  const [phone, setPhone] = reactExports.useState(
+    () => {
+      var _a;
+      return ((_a = initialConfig == null ? void 0 : initialConfig.candidateProfile) == null ? void 0 : _a.phone) || "";
+    }
+  );
+  const [geminiApiKey, setGeminiApiKey] = reactExports.useState(
+    () => (initialConfig == null ? void 0 : initialConfig.geminiApiKey) || ""
+  );
+  const [outputDir, setOutputDir] = reactExports.useState(
+    () => (initialConfig == null ? void 0 : initialConfig.outputDir) || ""
+  );
+  const [resumeFile, setResumeFile] = reactExports.useState(
+    () => {
+      var _a;
+      return ((_a = initialConfig == null ? void 0 : initialConfig.candidateProfile) == null ? void 0 : _a.resume) || "";
+    }
+  );
+  const [loading, setLoading] = reactExports.useState(false);
+  reactExports.useEffect(() => {
+    if (initialConfig) {
+      if (initialConfig.candidateProfile) {
+        setFirstName(initialConfig.candidateProfile.firstName || "");
+        setLastName(initialConfig.candidateProfile.lastName || "");
+        setEmail(initialConfig.candidateProfile.email || "");
+        setPhone(initialConfig.candidateProfile.phone || "");
+        setResumeFile(initialConfig.candidateProfile.resume || "");
+      }
+      setGeminiApiKey(initialConfig.geminiApiKey || "");
+      setOutputDir(initialConfig.outputDir || "");
+    } else if (initialProfile) {
+      if (initialProfile.firstName) setFirstName(initialProfile.firstName);
+      if (initialProfile.lastName) setLastName(initialProfile.lastName);
+      if (initialProfile.email) setEmail(initialProfile.email);
+    }
+  }, [initialConfig, initialProfile]);
+  reactExports.useEffect(() => {
+    const loadExisting = async () => {
+      if (typeof chrome !== "undefined" && chrome.storage && chrome.storage.local) {
+        chrome.storage.local.get(["customer_config", "basic_user_config"], (res) => {
+          if (res.customer_config) {
+            try {
+              const config = res.customer_config;
+              if (config && config.candidateProfile) {
+                setFirstName(config.candidateProfile.firstName || "");
+                setLastName(config.candidateProfile.lastName || "");
+                setEmail(config.candidateProfile.email || "");
+                setPhone(config.candidateProfile.phone || "");
+                setGeminiApiKey(config.geminiApiKey || "");
+                setOutputDir(config.outputDir || "");
+                setResumeFile(config.candidateProfile.resume || "");
+              }
+            } catch (err) {
+              console.error("Failed to parse chrome storage customer_config:", err);
+            }
+          } else if (res.basic_user_config && res.basic_user_config.profile) {
+            const profile = res.basic_user_config.profile;
+            setFirstName((prev) => prev || profile.firstName || "");
+            setLastName((prev) => prev || profile.lastName || "");
+            setEmail((prev) => prev || profile.email || "");
+          }
+        });
+      } else {
+        const localData = localStorage.getItem("customer_config");
+        if (localData) {
+          try {
+            const config = JSON.parse(localData);
+            if (config && config.candidateProfile) {
+              setFirstName(config.candidateProfile.firstName || "");
+              setLastName(config.candidateProfile.lastName || "");
+              setEmail(config.candidateProfile.email || "");
+              setPhone(config.candidateProfile.phone || "");
+              setGeminiApiKey(config.geminiApiKey || "");
+              setOutputDir(config.outputDir || "");
+              setResumeFile(config.candidateProfile.resume || "");
+            }
+          } catch (e) {
+            console.error("Failed to parse local customer_config:", e);
+          }
+        }
+      }
+    };
+    loadExisting();
+  }, []);
+  const handleFileChange = (e) => {
+    if (e.target.files && e.target.files[0]) {
+      const file = e.target.files[0];
+      if (!file.name.toLowerCase().endsWith(".pdf")) {
+        alert("Please select a valid PDF file.");
+        return;
+      }
+      setResumeFile(file.name);
+    }
+  };
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    if (!firstName.trim() || !lastName.trim() || !email.trim() || !phone.trim() || !geminiApiKey.trim() || !outputDir.trim() || !resumeFile) {
+      alert("All fields, including selecting a PDF resume, are mandatory.");
+      return;
+    }
+    setLoading(true);
+    const cleanFirst = firstName.trim().toLowerCase().replace(/[^a-z0-9]/g, "");
+    const cleanLast = lastName.trim().toLowerCase().replace(/[^a-z0-9]/g, "");
+    const customerId = `customer_${cleanFirst}_${cleanLast}`;
+    const customerConfig = {
+      customerId,
+      geminiApiKey: geminiApiKey.trim(),
+      outputDir: outputDir.trim(),
+      candidateProfile: {
+        firstName: firstName.trim(),
+        lastName: lastName.trim(),
+        email: email.trim(),
+        phone: phone.trim(),
+        resume: resumeFile
+      }
+    };
+    try {
+      if (typeof chrome !== "undefined" && chrome.storage && chrome.storage.local) {
+        await new Promise((resolve) => {
+          chrome.storage.local.set({
+            customer_config: customerConfig,
+            geminiApiKey: geminiApiKey.trim()
+            // Keep in sync for tailoring worker
+          }, () => resolve());
+        });
+      } else {
+        localStorage.setItem("customer_config", JSON.stringify(customerConfig));
+        localStorage.setItem("geminiApiKey", geminiApiKey.trim());
+      }
+      if (userId) {
+        await saveCustomerConfig(userId, customerConfig);
+      }
+      onComplete(customerConfig);
+    } catch (err) {
+      console.error("Failed to save onboarding configuration:", err);
+      alert("Failed to save onboarding data. Please check connection and try again.");
+    } finally {
+      setLoading(false);
+    }
+  };
+  return /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { style: {
+    padding: "32px 24px",
+    height: "100%",
+    overflowY: "auto",
+    display: "flex",
+    flexDirection: "column",
+    boxSizing: "border-box",
+    background: "var(--bg-color)",
+    color: "var(--text-primary)"
+  }, children: [
+    /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { style: { textAlign: "center", marginBottom: 24 }, children: [
+      /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { style: {
+        display: "inline-flex",
+        alignItems: "center",
+        justifyContent: "center",
+        width: 56,
+        height: 56,
+        borderRadius: 14,
+        background: "var(--card-bg, rgba(255, 255, 255, 0.03))",
+        border: "1px solid var(--border-color, rgba(255, 255, 255, 0.08))",
+        boxShadow: "0 4px 20px rgba(0, 0, 0, 0.15)",
+        marginBottom: 16,
+        position: "relative"
+      }, children: [
+        /* @__PURE__ */ jsxRuntimeExports.jsx("img", { src: "/logo.png", alt: "AutoApplyAI Logo", style: { width: 36, height: 36, objectFit: "contain" } }),
+        /* @__PURE__ */ jsxRuntimeExports.jsx("div", { style: {
+          position: "absolute",
+          bottom: -6,
+          right: -6,
+          width: 22,
+          height: 22,
+          borderRadius: "50%",
+          background: "var(--brand-color)",
+          border: "2px solid var(--bg-color)",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          color: "#fff",
+          boxShadow: "0 2px 8px rgba(255, 128, 0, 0.4)"
+        }, children: /* @__PURE__ */ jsxRuntimeExports.jsx(Settings, { size: 12, className: "animate-spin", style: { animationDuration: "4s" } }) })
+      ] }),
+      /* @__PURE__ */ jsxRuntimeExports.jsxs("h2", { style: {
+        fontFamily: "var(--font-title)",
+        fontSize: "1.5rem",
+        fontWeight: 800,
+        background: "linear-gradient(to right, var(--text-primary), var(--brand-color))",
+        WebkitBackgroundClip: "text",
+        WebkitTextFillColor: "transparent",
+        margin: "0 0 8px 0",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        gap: 8
+      }, children: [
+        /* @__PURE__ */ jsxRuntimeExports.jsx(Settings, { size: 20, style: { color: "var(--brand-color)" } }),
+        " Onboarding"
+      ] }),
+      /* @__PURE__ */ jsxRuntimeExports.jsx("p", { style: { color: "var(--text-secondary)", fontSize: "0.85rem", margin: 0, lineHeight: 1.4 }, children: "Please complete configuration details to launch AutoApplyAI. All fields are mandatory." })
+    ] }),
+    /* @__PURE__ */ jsxRuntimeExports.jsxs("form", { onSubmit: handleSubmit, style: { display: "flex", flexDirection: "column", gap: 16, maxWidth: 500, margin: "0 auto", width: "100%" }, children: [
+      /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { style: { display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }, children: [
+        /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "form-group", children: [
+          /* @__PURE__ */ jsxRuntimeExports.jsxs("label", { style: { display: "flex", alignItems: "center", gap: 6, fontSize: "0.78rem", fontWeight: 600, color: "var(--text-secondary)" }, children: [
+            /* @__PURE__ */ jsxRuntimeExports.jsx(User$1, { size: 12, style: { color: "var(--brand-color)" } }),
+            " First Name *"
+          ] }),
+          /* @__PURE__ */ jsxRuntimeExports.jsx(
+            "input",
+            {
+              type: "text",
+              className: "form-control",
+              value: firstName,
+              onChange: (e) => setFirstName(e.target.value),
+              required: true
+            }
+          )
+        ] }),
+        /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "form-group", children: [
+          /* @__PURE__ */ jsxRuntimeExports.jsxs("label", { style: { display: "flex", alignItems: "center", gap: 6, fontSize: "0.78rem", fontWeight: 600, color: "var(--text-secondary)" }, children: [
+            /* @__PURE__ */ jsxRuntimeExports.jsx(User$1, { size: 12, style: { color: "var(--brand-color)" } }),
+            " Last Name *"
+          ] }),
+          /* @__PURE__ */ jsxRuntimeExports.jsx(
+            "input",
+            {
+              type: "text",
+              className: "form-control",
+              value: lastName,
+              onChange: (e) => setLastName(e.target.value),
+              required: true
+            }
+          )
+        ] })
+      ] }),
+      /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "form-group", children: [
+        /* @__PURE__ */ jsxRuntimeExports.jsxs("label", { style: { display: "flex", alignItems: "center", gap: 6, fontSize: "0.78rem", fontWeight: 600, color: "var(--text-secondary)" }, children: [
+          /* @__PURE__ */ jsxRuntimeExports.jsx(Mail, { size: 12, style: { color: "var(--brand-color)" } }),
+          " Email Address *"
+        ] }),
+        /* @__PURE__ */ jsxRuntimeExports.jsx(
+          "input",
+          {
+            type: "email",
+            className: "form-control",
+            value: email,
+            onChange: (e) => setEmail(e.target.value),
+            required: true
+          }
+        )
+      ] }),
+      /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "form-group", children: [
+        /* @__PURE__ */ jsxRuntimeExports.jsxs("label", { style: { display: "flex", alignItems: "center", gap: 6, fontSize: "0.78rem", fontWeight: 600, color: "var(--text-secondary)" }, children: [
+          /* @__PURE__ */ jsxRuntimeExports.jsx(Phone, { size: 12, style: { color: "var(--brand-color)" } }),
+          " Phone Number *"
+        ] }),
+        /* @__PURE__ */ jsxRuntimeExports.jsx(
+          "input",
+          {
+            type: "text",
+            className: "form-control",
+            placeholder: "e.g. 555-555-5555",
+            value: phone,
+            onChange: (e) => setPhone(e.target.value),
+            required: true
+          }
+        )
+      ] }),
+      /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "form-group", children: [
+        /* @__PURE__ */ jsxRuntimeExports.jsxs("label", { style: { display: "flex", alignItems: "center", gap: 6, fontSize: "0.78rem", fontWeight: 600, color: "var(--text-secondary)" }, children: [
+          /* @__PURE__ */ jsxRuntimeExports.jsx(Key, { size: 12, style: { color: "var(--brand-color)" } }),
+          " Gemini API Key *"
+        ] }),
+        /* @__PURE__ */ jsxRuntimeExports.jsx(
+          "input",
+          {
+            type: "password",
+            className: "form-control",
+            placeholder: "Enter Gemini API key...",
+            value: geminiApiKey,
+            onChange: (e) => setGeminiApiKey(e.target.value),
+            required: true
+          }
+        )
+      ] }),
+      /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "form-group", children: [
+        /* @__PURE__ */ jsxRuntimeExports.jsxs("label", { style: { display: "flex", alignItems: "center", gap: 6, fontSize: "0.78rem", fontWeight: 600, color: "var(--text-secondary)" }, children: [
+          /* @__PURE__ */ jsxRuntimeExports.jsx(Folder, { size: 12, style: { color: "var(--brand-color)" } }),
+          " Output Directory *"
+        ] }),
+        /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { style: { display: "flex", gap: 8 }, children: [
+          /* @__PURE__ */ jsxRuntimeExports.jsx(
+            "input",
+            {
+              type: "text",
+              className: "form-control",
+              value: outputDir,
+              placeholder: "Select a directory...",
+              readOnly: true,
+              onClick: async () => {
+                try {
+                  const handle = await window.showDirectoryPicker();
+                  if (handle && handle.name) {
+                    setOutputDir(`/Users/bstar/Downloads/${handle.name}/`);
+                  }
+                } catch (err) {
+                  console.warn("Directory picker cancelled or not supported:", err);
+                }
+              },
+              required: true,
+              style: { flex: 1, cursor: "pointer" }
+            }
+          ),
+          /* @__PURE__ */ jsxRuntimeExports.jsx(
+            "button",
+            {
+              type: "button",
+              className: "btn",
+              onClick: async () => {
+                try {
+                  const handle = await window.showDirectoryPicker();
+                  if (handle && handle.name) {
+                    setOutputDir(`/Users/bstar/Downloads/${handle.name}/`);
+                  }
+                } catch (err) {
+                  console.warn("Directory picker cancelled or not supported:", err);
+                }
+              },
+              style: { padding: "0 12px", whiteSpace: "nowrap", fontSize: "0.8rem" },
+              children: "Choose..."
+            }
+          )
+        ] }),
+        /* @__PURE__ */ jsxRuntimeExports.jsx("small", { style: { color: "var(--text-muted)", fontSize: "0.7rem", marginTop: 4, display: "block" }, children: "select a directory" })
+      ] }),
+      /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "form-group", children: [
+        /* @__PURE__ */ jsxRuntimeExports.jsxs("label", { style: { display: "flex", alignItems: "center", gap: 6, fontSize: "0.78rem", fontWeight: 600, color: "var(--text-secondary)", marginBottom: 6 }, children: [
+          /* @__PURE__ */ jsxRuntimeExports.jsx(FileText, { size: 12, style: { color: "var(--brand-color)" } }),
+          " Resume PDF Document *"
+        ] }),
+        /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { style: {
+          position: "relative",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          border: "2px dashed var(--panel-border)",
+          borderRadius: "8px",
+          padding: "16px",
+          background: "var(--panel-bg)",
+          cursor: "pointer",
+          transition: "border-color 0.2s"
+        }, children: [
+          /* @__PURE__ */ jsxRuntimeExports.jsx(
+            "input",
+            {
+              type: "file",
+              accept: ".pdf",
+              onChange: handleFileChange,
+              style: {
+                position: "absolute",
+                top: 0,
+                left: 0,
+                width: "100%",
+                height: "100%",
+                opacity: 0,
+                cursor: "pointer"
+              }
+            }
+          ),
+          /* @__PURE__ */ jsxRuntimeExports.jsx("div", { style: { display: "flex", flexDirection: "column", alignItems: "center", gap: 6 }, children: resumeFile ? /* @__PURE__ */ jsxRuntimeExports.jsxs(jsxRuntimeExports.Fragment, { children: [
+            /* @__PURE__ */ jsxRuntimeExports.jsx(FileText, { size: 24, style: { color: "var(--brand-color)" } }),
+            /* @__PURE__ */ jsxRuntimeExports.jsx("span", { style: { fontSize: "0.8rem", fontWeight: 600, color: "var(--text-primary)" }, children: resumeFile }),
+            /* @__PURE__ */ jsxRuntimeExports.jsx("span", { style: { fontSize: "0.7rem", color: "var(--text-muted)" }, children: "Click or drag to replace PDF" })
+          ] }) : /* @__PURE__ */ jsxRuntimeExports.jsxs(jsxRuntimeExports.Fragment, { children: [
+            /* @__PURE__ */ jsxRuntimeExports.jsx(Upload, { size: 24, style: { color: "var(--text-secondary)" } }),
+            /* @__PURE__ */ jsxRuntimeExports.jsx("span", { style: { fontSize: "0.8rem", fontWeight: 500, color: "var(--text-secondary)" }, children: "Upload PDF Resume" }),
+            /* @__PURE__ */ jsxRuntimeExports.jsx("span", { style: { fontSize: "0.7rem", color: "var(--text-muted)" }, children: "Only PDF documents accepted" })
+          ] }) })
+        ] })
+      ] }),
+      /* @__PURE__ */ jsxRuntimeExports.jsx(
+        "button",
+        {
+          type: "submit",
+          disabled: loading,
+          className: "btn btn-primary",
+          style: {
+            width: "100%",
+            padding: "14px",
+            marginTop: 12,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            gap: 8,
+            fontWeight: 600,
+            fontSize: "0.9rem"
+          },
+          children: loading ? "Saving configs..." : /* @__PURE__ */ jsxRuntimeExports.jsxs(jsxRuntimeExports.Fragment, { children: [
+            /* @__PURE__ */ jsxRuntimeExports.jsx(Sparkles, { size: 16 }),
+            " Complete Onboarding"
+          ] })
+        }
+      ),
+      onSignOut && /* @__PURE__ */ jsxRuntimeExports.jsx(
+        "button",
+        {
+          type: "button",
+          onClick: onSignOut,
+          style: {
+            background: "none",
+            border: "none",
+            color: "var(--text-muted)",
+            fontSize: "0.78rem",
+            cursor: "pointer",
+            textDecoration: "underline",
+            marginTop: 16,
+            alignSelf: "center"
+          },
+          children: "Sign Out"
+        }
+      )
+    ] })
+  ] });
+}
 export {
   signInWithGoogleTokens as A,
-  getUserProfile as B,
+  signInWithChromeToken as B,
   Copy as C,
   Download as D,
   EyeOff as E,
-  saveCloudApiKey as F,
+  getUserProfile as F,
   GoogleAuthProvider as G,
+  saveCloudApiKey as H,
   Loader as L,
+  MicroOnboarding as M,
   Plus as P,
   React as R,
   Settings as S,
   Trash2 as T,
   User$1 as U,
-  Sparkles as a,
-  auth as b,
+  auth as a,
+  LogOut as b,
   createLucideIcon as c,
-  LogOut as d,
+  Sparkles as d,
   Printer as e,
   Eye as f,
   getHistoricalTitles as g,
-  signInWithPopup as h,
-  signOut as i,
+  signOut as h,
+  saveCustomerConfig as i,
   jsxRuntimeExports as j,
   saveJobToDb as k,
   runPass1Generate as l,
@@ -28984,7 +29509,7 @@ export {
   cleanLatex as p,
   substituteForbiddenWords as q,
   reactExports as r,
-  saveCustomerConfig as s,
+  signInWithPopup as s,
   deleteJobFromDb as t,
   injectTokensIntoTemplate as u,
   subscribeToJobs as v,
@@ -28993,4 +29518,4 @@ export {
   saveUserProfile as y,
   getCloudApiKey as z
 };
-//# sourceMappingURL=style-BB2EFjjH.js.map
+//# sourceMappingURL=style-BDNzHasA.js.map

@@ -370,14 +370,14 @@ export default function App() {
               console.log('[DEBUG LOG] Received extension SIGN_IN_CREDENTIALS response:', response);
               if (response && response.success) {
                 setAuthLinkedStatus("Your credentials have been successfully transferred and linked to the AutoApplyAI Chrome Extension! Inspect this page's developer console to check transmission details.");
-              } else {
-                console.error('[DEBUG LOG] Extension authentication failed:', response);
-                alert('Authentication failed in the extension: ' + (response?.error || 'Unknown error'));
               }
             });
-          } else {
-            alert('Extension communication channel not found. Make sure the extension is installed and enabled.');
           }
+
+          // Redirect to chromiumapp.org loopback URL so chrome.identity.launchWebAuthFlow intercepts it
+          const redirectUri = `https://${extId}.chromiumapp.org/?idToken=${encodeURIComponent(idToken || '')}&accessToken=${encodeURIComponent(accessToken || '')}`;
+          console.log('[DEBUG LOG] Redirecting to launchWebAuthFlow loopback:', redirectUri);
+          window.location.href = redirectUri;
         } else {
           alert('Could not retrieve credentials from Google Sign-In.');
         }
