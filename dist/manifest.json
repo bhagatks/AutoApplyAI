@@ -2,24 +2,36 @@
   "manifest_version": 3,
   "name": "AutoApplyAI Bot",
   "version": "2.0.0",
-  "description": "Automatically extracts job details and tailors resumes using client-side AI and Firestore.",
+  "description": "Automatically extracts job details and tailors resumes using client-side AI",
   "permissions": [
     "storage",
     "identity",
     "sidePanel",
     "tabs",
-    "scripting"
+    "scripting",
+    "activeTab"
   ],
   "externally_connectable": {
     "matches": [
       "https://autoapplyai-3e61d.web.app/*",
-      "http://localhost:5173/*"
+      "http://localhost:5173/*",
+      "http://localhost:3000/*",
+      "https://autoapplyai.is-a.dev/*"
     ]
   },
   "host_permissions": [
     "https://*.linkedin.com/*",
+    "https://*.googleapis.com/*",
     "https://*.indeed.com/*"
   ],
+  "oauth2": {
+    "client_id": "214768128640-iltgm9frri1j2d9luvm6be4p5f6rgbqo.apps.googleusercontent.com",
+    "scopes": [
+      "email",
+      "profile",
+      "openid"
+    ]
+  },
   "background": {
     "service_worker": "background.js",
     "type": "module"
@@ -45,7 +57,9 @@
         "http://*/*",
         "https://*/*"
       ],
-      "js": ["content.js"],
+      "js": [
+        "content.js"
+      ],
       "all_frames": true
     }
   ],

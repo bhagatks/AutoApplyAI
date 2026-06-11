@@ -28,7 +28,7 @@ export const BASE_PROFILE: BaseProfile = {
   firstName: "Bhagath",
   lastName: "Siddi",
   email: "bhagathsiddi@gmail.com",
-  phone: "989-312-3420",
+  phone: "555-555-5555",
   location: "Prosper, TX 75078",
   linkedin: "linkedin.com/in/bhagathsiddi",
   role: "DIRECTOR OF AI ENGINEERING | STRATEGY & ENTERPRISE ML LIFE-CYCLE",

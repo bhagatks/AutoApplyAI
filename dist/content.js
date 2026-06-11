@@ -1,4 +1,19 @@
-(function(){"use strict";let p=!1;const g=()=>{var e;try{return!!((e=chrome.runtime)!=null&&e.getManifest())}catch{return!1}},y=()=>{if(document.getElementById("ag-widget-styles"))return;const e=document.createElement("style");e.id="ag-widget-styles",e.innerHTML=`
+(function() {
+  "use strict";
+  let isProcessing = false;
+  const isContextValid = () => {
+    var _a;
+    try {
+      return !!((_a = chrome.runtime) == null ? void 0 : _a.getManifest());
+    } catch (e) {
+      return false;
+    }
+  };
+  const injectCSS = () => {
+    if (document.getElementById("ag-widget-styles")) return;
+    const style = document.createElement("style");
+    style.id = "ag-widget-styles";
+    style.innerHTML = `
     .ag-widget {
       position: fixed;
       bottom: 24px;
@@ -181,7 +196,17 @@
       height: 20px;
       object-fit: contain;
     }
-  `,document.head.appendChild(e)},v=()=>{y();let e=document.getElementById("ag-apply-widget");e||(e=document.createElement("div"),e.id="ag-apply-widget",e.className="ag-widget",e.innerHTML=`
+  `;
+    document.head.appendChild(style);
+  };
+  const showWidget = () => {
+    injectCSS();
+    let widget = document.getElementById("ag-apply-widget");
+    if (!widget) {
+      widget = document.createElement("div");
+      widget.id = "ag-apply-widget";
+      widget.className = "ag-widget";
+      widget.innerHTML = `
       <div class="ag-header">
         <img class="ag-logo" src="${chrome.runtime.getURL("logo.png")}" alt="Logo" />
         <span class="ag-title">AutoApplyAI Resume Tailor</span>
@@ -205,10 +230,366 @@
         </div>
       </div>
       <div class="ag-footer">Serverless Client-Side Processing</div>
-    `,document.body.appendChild(e));for(let o=1;o<=4;o++){const t=document.getElementById(`ag-step-${o}`);if(t){t.className="ag-step";const n=t.querySelector("span:nth-child(2)");o===1&&(n.innerText="Extracting job details..."),o===2&&(n.innerText="Tailoring & Optimizing Resume..."),o===3&&(n.innerText="Saving results to Firestore..."),o===4&&(n.innerText="Complete! Check your side panel")}}return setTimeout(()=>e==null?void 0:e.classList.add("show"),50),e},c=(e,o,t=null)=>{const n=document.getElementById(`ag-step-${e}`);if(!n)return;n.className=`ag-step ${o}`;const a=n.querySelector(".ag-bullet"),l=n.querySelector("span:nth-child(2)");t&&(l.innerText=t),o==="active"?a.innerHTML='<div class="ag-spinner"></div>':o==="success"?a.innerHTML="✓":o==="failed"?a.innerHTML="✗":a.innerHTML=String(e)},x=()=>{const e=[".jobs-description__content",".jobs-box__html-content",".job-details-jobs-unified-top-card","#jobDescriptionText",".jobsearch-JobComponent-description",'[data-automation-id="jobDescriptionText"]',"#content",".section-wrapper","main","article"];for(const o of e){const t=document.querySelector(o);if(t&&t.innerText.trim().length>200)return t.innerText.trim()}return document.body.innerText.trim()},j=async()=>{if(!g()||p)return;p=!0,v(),c(1,"active");const e=x(),o=window.location.href;if(!e||e.length<50){c(1,"failed","Extraction failed: Empty content"),p=!1,b();return}c(1,"success","✓ Job details extracted"),c(2,"active");try{chrome.runtime.sendMessage({action:"TAILOR_JOB",jobDescription:e,jobUrl:o},t=>{if(chrome.runtime.lastError){console.error("Runtime error communicating with background:",chrome.runtime.lastError),c(2,"failed","✗ Extension background inactive"),p=!1,b();return}t&&!t.success&&(c(2,"failed",`✗ Tailor failed: ${t.error||"Unknown error"}`),p=!1,b())})}catch(t){console.error("Failed to send message to background worker:",t),c(2,"failed","✗ Extension context invalidated"),p=!1,b()}};try{chrome.runtime.onMessage.addListener((e,o,t)=>{if(g()){if(e.action==="GET_JOB_DETAILS"){const n=x();t({success:!0,jobDescription:n,url:window.location.href});return}if(e.action==="UPDATE_WIDGET"){const{step:n,state:a,labelText:l}=e;c(n,a,l),n===4&&(a==="success"||a==="failed")&&(p=!1,b())}}})}catch(e){console.warn("AutoApplyAI: Failed to register message listener:",e)}const b=()=>{setTimeout(()=>{const e=document.getElementById("ag-apply-widget");e&&!p&&e.classList.remove("show")},8e3)};document.body.addEventListener("click",e=>{if(!g())return;const o=e.target;if(!o)return;o.closest('.jobs-apply-button, .jobs-s-apply button, button[aria-label*="Apply"], button[aria-label*="Easy Apply"], .jobsearch-CallToActionButton, .icl-Button--primary')&&(console.log("AutoApplyAI Bot: Detected click on Apply button, launching tailoring..."),j())});const E=()=>{const e=window.location.href.toLowerCase();if(["linkedin.com/jobs","indeed.com","greenhouse.io","lever.co","workday","smartrecruiters.com","ziprecruiter.com","monster.com","glassdoor.com"].some(i=>e.includes(i)))return!0;let t=0;["/job/","/jobs/","/career","/careers","/vacancy","/posting","/apply","viewjob","showjob"].some(i=>e.includes(i))&&(t+=2);const a=Array.from(document.querySelectorAll('button, a.btn, a.button, .button, .btn, [role="button"]')),l=/^(apply|apply now|easy apply|submit application|apply to this job|quick apply)$/i;a.some(i=>{var w;const d=((w=i.textContent)==null?void 0:w.trim())||"";return l.test(d)||d.toLowerCase().includes("apply")&&d.length<25})&&(t+=2);const m=document.body.innerText.toLowerCase(),r=["requirements","responsibilities","qualifications","who you are","what you will do","about the role","key responsibilities"];let s=0;for(const i of r)m.includes(i)&&s++;return s>=2&&(t+=2),t>=3},I=()=>{var t;const e=[".jobs-s-apply",".jobs-apply-button",".jobsearch-CallToActionButton","#applyButtonLinkContainer",".jobsearch-IndeedApplyButton",".page-apply-button",".submit-application-btn","#apply-button",'[data-automation-id="apply-button"]',".postings-btn",".apply-btn",'a[href*="/apply"]','button[id*="apply"]','a[id*="apply"]'];for(const n of e){const a=document.querySelector(n);if(a&&a.offsetWidth>0&&a.offsetHeight>0)return a}const o=Array.from(document.querySelectorAll('button, a.btn, a.button, [role="button"]'));for(const n of o){const a=((t=n.textContent)==null?void 0:t.trim().toLowerCase())||"";if((a==="apply"||a.includes("apply now")||a.includes("easy apply")||a.includes("apply on")||a.includes("apply to")||a.includes("submit application"))&&n.offsetWidth>0&&n.offsetHeight>0)return n}return null};let h=null;const A=()=>{var t,n,a,l,u,m;if(!g()){if(f){try{f.disconnect()}catch{}f=null}h&&clearInterval(h),(t=document.getElementById("autoapplyai-injected-btn"))==null||t.remove(),(n=document.getElementById("autoapplyai-floating-btn"))==null||n.remove();return}if(!E()){(a=document.getElementById("autoapplyai-injected-btn"))==null||a.remove(),(l=document.getElementById("autoapplyai-floating-btn"))==null||l.remove();return}const e=x();if(!e||e.length<50)return;const o=I();if(o){(u=document.getElementById("autoapplyai-floating-btn"))==null||u.remove();const r=document.getElementById("autoapplyai-injected-btn"),s=o.parentNode;if(s){if(r&&r.parentNode===s&&r.nextSibling===o)return;r==null||r.remove();const i=document.createElement("button");i.id="autoapplyai-injected-btn",i.className="autoapplyai-injected-btn",i.innerHTML=`
+    `;
+      document.body.appendChild(widget);
+    }
+    for (let i = 1; i <= 4; i++) {
+      const step = document.getElementById(`ag-step-${i}`);
+      if (step) {
+        step.className = "ag-step";
+        const desc = step.querySelector("span:nth-child(2)");
+        if (i === 1) desc.innerText = "Extracting job details...";
+        if (i === 2) desc.innerText = "Tailoring & Optimizing Resume...";
+        if (i === 3) desc.innerText = "Saving results to Firestore...";
+        if (i === 4) desc.innerText = "Complete! Check your side panel";
+      }
+    }
+    setTimeout(() => widget == null ? void 0 : widget.classList.add("show"), 50);
+    return widget;
+  };
+  const setStepState = (stepNum, state, message = null) => {
+    const step = document.getElementById(`ag-step-${stepNum}`);
+    if (!step) return;
+    step.className = `ag-step ${state}`;
+    const bullet = step.querySelector(".ag-bullet");
+    const label = step.querySelector("span:nth-child(2)");
+    if (message) {
+      label.innerText = message;
+    }
+    if (state === "active") {
+      bullet.innerHTML = '<div class="ag-spinner"></div>';
+    } else if (state === "success") {
+      bullet.innerHTML = "✓";
+    } else if (state === "failed") {
+      bullet.innerHTML = "✗";
+    } else {
+      bullet.innerHTML = String(stepNum);
+    }
+  };
+  const extractJobDescription = () => {
+    const selectors = [
+      ".jobs-description__content",
+      // LinkedIn Description
+      ".jobs-box__html-content",
+      ".job-details-jobs-unified-top-card",
+      // LinkedIn top card
+      "#jobDescriptionText",
+      // Indeed Description
+      ".jobsearch-JobComponent-description",
+      '[data-automation-id="jobDescriptionText"]',
+      // Workday Description
+      "#content",
+      ".section-wrapper",
+      "main",
+      "article"
+    ];
+    for (const sel of selectors) {
+      const el = document.querySelector(sel);
+      if (el && el.innerText.trim().length > 200) {
+        return el.innerText.trim();
+      }
+    }
+    return document.body.innerText.trim();
+  };
+  const triggerAutomaticTailoring = async () => {
+    if (!isContextValid()) return;
+    if (isProcessing) return;
+    isProcessing = true;
+    showWidget();
+    setStepState(1, "active");
+    const jd = extractJobDescription();
+    const url = window.location.href;
+    if (!jd || jd.length < 50) {
+      setStepState(1, "failed", "Extraction failed: Empty content");
+      isProcessing = false;
+      scheduleWidgetHide();
+      return;
+    }
+    setStepState(1, "success", "✓ Job details extracted");
+    setStepState(2, "active");
+    try {
+      chrome.runtime.sendMessage(
+        { action: "TAILOR_JOB", jobDescription: jd, jobUrl: url },
+        (response) => {
+          if (chrome.runtime.lastError) {
+            console.error("Runtime error communicating with background:", chrome.runtime.lastError);
+            setStepState(2, "failed", "✗ Extension background inactive");
+            isProcessing = false;
+            scheduleWidgetHide();
+            return;
+          }
+          if (response && !response.success) {
+            setStepState(2, "failed", `✗ Tailor failed: ${response.error || "Unknown error"}`);
+            isProcessing = false;
+            scheduleWidgetHide();
+          }
+        }
+      );
+    } catch (err) {
+      console.error("Failed to send message to background worker:", err);
+      setStepState(2, "failed", "✗ Extension context invalidated");
+      isProcessing = false;
+      scheduleWidgetHide();
+    }
+  };
+  try {
+    chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+      if (!isContextValid()) return;
+      if (message.action === "GET_JOB_DETAILS") {
+        const jd = extractJobDescription();
+        sendResponse({ success: true, jobDescription: jd, url: window.location.href });
+        return;
+      }
+      if (message.action === "UPDATE_WIDGET") {
+        const { step, state, labelText } = message;
+        setStepState(step, state, labelText);
+        if (step === 4 && (state === "success" || state === "failed")) {
+          isProcessing = false;
+          scheduleWidgetHide();
+        }
+        return;
+      }
+      if (message.action === "SIGN_OUT") {
+        window.postMessage({ action: "EXT_SIGNOUT" }, "*");
+        sendResponse({ success: true });
+        return;
+      }
+    });
+  } catch (err) {
+    console.warn("AutoApplyAI: Failed to register message listener:", err);
+  }
+  const scheduleWidgetHide = () => {
+    setTimeout(() => {
+      const widget = document.getElementById("ag-apply-widget");
+      if (widget && !isProcessing) {
+        widget.classList.remove("show");
+      }
+    }, 8e3);
+  };
+  document.body.addEventListener("click", (e) => {
+    if (!isContextValid()) return;
+    const target = e.target;
+    if (!target) return;
+    const applyButton = target.closest(
+      '.jobs-apply-button, .jobs-s-apply button, button[aria-label*="Apply"], button[aria-label*="Easy Apply"], .jobsearch-CallToActionButton, .icl-Button--primary'
+    );
+    if (applyButton) {
+      console.log("AutoApplyAI Bot: Detected click on Apply button, launching tailoring...");
+      triggerAutomaticTailoring();
+    }
+  });
+  const isJobPage = () => {
+    const url = window.location.href.toLowerCase();
+    const jobDomains = [
+      "linkedin.com/jobs",
+      "indeed.com",
+      "greenhouse.io",
+      "lever.co",
+      "workday",
+      "smartrecruiters.com",
+      "ziprecruiter.com",
+      "monster.com",
+      "glassdoor.com"
+    ];
+    if (jobDomains.some((domain) => url.includes(domain))) {
+      return true;
+    }
+    let score = 0;
+    const urlKeywords = ["/job/", "/jobs/", "/career", "/careers", "/vacancy", "/posting", "/apply", "viewjob", "showjob"];
+    if (urlKeywords.some((kw) => url.includes(kw))) {
+      score += 2;
+    }
+    const buttons = Array.from(document.querySelectorAll('button, a.btn, a.button, .button, .btn, [role="button"]'));
+    const applyTextRegex = /^(apply|apply now|easy apply|submit application|apply to this job|quick apply)$/i;
+    const hasApplyButton = buttons.some((btn) => {
+      var _a;
+      const text = ((_a = btn.textContent) == null ? void 0 : _a.trim()) || "";
+      return applyTextRegex.test(text) || text.toLowerCase().includes("apply") && text.length < 25;
+    });
+    if (hasApplyButton) {
+      score += 2;
+    }
+    const pageText = document.body.innerText.toLowerCase();
+    const jdSections = ["requirements", "responsibilities", "qualifications", "who you are", "what you will do", "about the role", "key responsibilities"];
+    let foundSections = 0;
+    for (const sec of jdSections) {
+      if (pageText.includes(sec)) foundSections++;
+    }
+    if (foundSections >= 2) {
+      score += 2;
+    }
+    return score >= 3;
+  };
+  const findNativeApplyButton = () => {
+    var _a;
+    const commonSelectors = [
+      ".jobs-s-apply",
+      ".jobs-apply-button",
+      // LinkedIn
+      ".jobsearch-CallToActionButton",
+      "#applyButtonLinkContainer",
+      ".jobsearch-IndeedApplyButton",
+      // Indeed
+      ".page-apply-button",
+      ".submit-application-btn",
+      // Generic
+      "#apply-button",
+      '[data-automation-id="apply-button"]',
+      // Workday
+      ".postings-btn",
+      ".apply-btn",
+      // Lever / Greenhouse
+      'a[href*="/apply"]',
+      'button[id*="apply"]',
+      'a[id*="apply"]'
+      // General patterns
+    ];
+    for (const sel of commonSelectors) {
+      const el = document.querySelector(sel);
+      if (el && el.offsetWidth > 0 && el.offsetHeight > 0) {
+        return el;
+      }
+    }
+    const buttons = Array.from(document.querySelectorAll('button, a.btn, a.button, [role="button"]'));
+    for (const btn of buttons) {
+      const text = ((_a = btn.textContent) == null ? void 0 : _a.trim().toLowerCase()) || "";
+      if (text === "apply" || text.includes("apply now") || text.includes("easy apply") || text.includes("apply on") || text.includes("apply to") || text.includes("submit application")) {
+        if (btn.offsetWidth > 0 && btn.offsetHeight > 0) {
+          return btn;
+        }
+      }
+    }
+    return null;
+  };
+  let checkInterval = null;
+  const injectButton = () => {
+    var _a, _b, _c, _d, _e, _f;
+    if (!isContextValid()) {
+      if (observer) {
+        try {
+          observer.disconnect();
+        } catch (err) {
+        }
+        observer = null;
+      }
+      if (checkInterval) {
+        clearInterval(checkInterval);
+      }
+      (_a = document.getElementById("autoapplyai-injected-btn")) == null ? void 0 : _a.remove();
+      (_b = document.getElementById("autoapplyai-floating-btn")) == null ? void 0 : _b.remove();
+      return;
+    }
+    if (!isJobPage()) {
+      (_c = document.getElementById("autoapplyai-injected-btn")) == null ? void 0 : _c.remove();
+      (_d = document.getElementById("autoapplyai-floating-btn")) == null ? void 0 : _d.remove();
+      return;
+    }
+    const jd = extractJobDescription();
+    if (!jd || jd.length < 50) return;
+    const nativeApplyBtn = findNativeApplyButton();
+    if (nativeApplyBtn) {
+      (_e = document.getElementById("autoapplyai-floating-btn")) == null ? void 0 : _e.remove();
+      const inlineBtn = document.getElementById("autoapplyai-injected-btn");
+      const targetParent = nativeApplyBtn.parentNode;
+      if (targetParent) {
+        if (inlineBtn && inlineBtn.parentNode === targetParent && inlineBtn.nextSibling === nativeApplyBtn) {
+          return;
+        }
+        inlineBtn == null ? void 0 : inlineBtn.remove();
+        const btn = document.createElement("button");
+        btn.id = "autoapplyai-injected-btn";
+        btn.className = "autoapplyai-injected-btn";
+        btn.innerHTML = `
         <img src="${chrome.runtime.getURL("icon-128.png")}" alt="A" />
         <span>Apply with AI</span>
-      `,i.addEventListener("click",d=>{if(d.preventDefault(),d.stopPropagation(),!g()){alert("AutoApplyAI: Extension was updated/reloaded. Please refresh the page to use the extension.");return}console.log("AutoApplyAI: Custom inline button clicked. Opening side panel..."),chrome.runtime.sendMessage({action:"OPEN_SIDEPANEL"},()=>{chrome.runtime.lastError&&console.error("Failed to open sidepanel:",chrome.runtime.lastError)})}),y();try{s.insertBefore(i,o),console.log('AutoApplyAI: Successfully injected custom inline "Apply with AI" button.')}catch(d){console.warn("AutoApplyAI: DOM race during insertion, will retry:",d)}}}else{(m=document.getElementById("autoapplyai-injected-btn"))==null||m.remove();const r=document.getElementById("autoapplyai-floating-btn");if(r){if(r.parentElement===document.body)return;r.remove()}const s=document.createElement("button");s.id="autoapplyai-floating-btn",s.className="autoapplyai-floating-btn",s.innerHTML=`
+      `;
+        btn.addEventListener("click", (e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          if (!isContextValid()) {
+            alert("AutoApplyAI: Extension was updated/reloaded. Please refresh the page to use the extension.");
+            return;
+          }
+          console.log("AutoApplyAI: Custom inline button clicked. Opening side panel...");
+          chrome.runtime.sendMessage({ action: "OPEN_SIDEPANEL" }, () => {
+            if (chrome.runtime.lastError) {
+              console.error("Failed to open sidepanel:", chrome.runtime.lastError);
+            }
+          });
+        });
+        injectCSS();
+        try {
+          targetParent.insertBefore(btn, nativeApplyBtn);
+          console.log('AutoApplyAI: Successfully injected custom inline "Apply with AI" button.');
+        } catch (err) {
+          console.warn("AutoApplyAI: DOM race during insertion, will retry:", err);
+        }
+      }
+    } else {
+      (_f = document.getElementById("autoapplyai-injected-btn")) == null ? void 0 : _f.remove();
+      const floatingBtn = document.getElementById("autoapplyai-floating-btn");
+      if (floatingBtn) {
+        if (floatingBtn.parentElement === document.body) {
+          return;
+        }
+        floatingBtn.remove();
+      }
+      const btn = document.createElement("button");
+      btn.id = "autoapplyai-floating-btn";
+      btn.className = "autoapplyai-floating-btn";
+      btn.innerHTML = `
       <img src="${chrome.runtime.getURL("icon-128.png")}" alt="A" />
       <span>Apply with AI</span>
-    `,s.addEventListener("click",i=>{if(i.preventDefault(),i.stopPropagation(),!g()){alert("AutoApplyAI: Extension was updated/reloaded. Please refresh the page to use the extension.");return}console.log("AutoApplyAI: Custom floating button clicked. Opening side panel..."),chrome.runtime.sendMessage({action:"OPEN_SIDEPANEL"},()=>{chrome.runtime.lastError&&console.error("Failed to open sidepanel:",chrome.runtime.lastError)})}),y(),document.body.appendChild(s),console.log('AutoApplyAI: Successfully injected custom floating side tab "Apply with AI" button.')}};let f=null;const T=()=>{f||(f=new MutationObserver(e=>{let o=!1;for(const t of e){const n=t.target;if(!(n.id==="autoapplyai-injected-btn"||n.id==="autoapplyai-floating-btn")&&(t.addedNodes.length>0||t.removedNodes.length>0)&&!Array.from(t.addedNodes).concat(Array.from(t.removedNodes)).every(l=>{const u=l;return u.id==="autoapplyai-injected-btn"||u.id==="autoapplyai-floating-btn"||u.id==="ag-widget-styles"})){o=!0;break}}o&&A()}),f.observe(document.body,{childList:!0,subtree:!0}))};A(),T(),h=setInterval(A,2e3),console.log("AutoApplyAI Bot: Content Script loaded successfully.")})();
+    `;
+      btn.addEventListener("click", (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        if (!isContextValid()) {
+          alert("AutoApplyAI: Extension was updated/reloaded. Please refresh the page to use the extension.");
+          return;
+        }
+        console.log("AutoApplyAI: Custom floating button clicked. Opening side panel...");
+        chrome.runtime.sendMessage({ action: "OPEN_SIDEPANEL" }, () => {
+          if (chrome.runtime.lastError) {
+            console.error("Failed to open sidepanel:", chrome.runtime.lastError);
+          }
+        });
+      });
+      injectCSS();
+      document.body.appendChild(btn);
+      console.log('AutoApplyAI: Successfully injected custom floating side tab "Apply with AI" button.');
+    }
+  };
+  let observer = null;
+  const startObserver = () => {
+    if (observer) return;
+    observer = new MutationObserver((mutations) => {
+      let shouldInject = false;
+      for (const mutation of mutations) {
+        const target = mutation.target;
+        if (target.id === "autoapplyai-injected-btn" || target.id === "autoapplyai-floating-btn") {
+          continue;
+        }
+        if (mutation.addedNodes.length > 0 || mutation.removedNodes.length > 0) {
+          const isSelfMutation = Array.from(mutation.addedNodes).concat(Array.from(mutation.removedNodes)).every((node) => {
+            const el = node;
+            return el.id === "autoapplyai-injected-btn" || el.id === "autoapplyai-floating-btn" || el.id === "ag-widget-styles";
+          });
+          if (!isSelfMutation) {
+            shouldInject = true;
+            break;
+          }
+        }
+      }
+      if (shouldInject) {
+        injectButton();
+      }
+    });
+    observer.observe(document.body, { childList: true, subtree: true });
+  };
+  injectButton();
+  startObserver();
+  checkInterval = setInterval(injectButton, 2e3);
+  console.log("AutoApplyAI Bot: Content Script loaded successfully.");
+})();
+//# sourceMappingURL=content.js.map

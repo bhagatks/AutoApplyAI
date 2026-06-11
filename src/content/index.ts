@@ -374,6 +374,13 @@ try {
         isProcessing = false;
         scheduleWidgetHide();
       }
+      return;
+    }
+
+    if (message.action === 'SIGN_OUT') {
+      window.postMessage({ action: 'EXT_SIGNOUT' }, '*');
+      sendResponse({ success: true });
+      return;
     }
   });
 } catch (err) {

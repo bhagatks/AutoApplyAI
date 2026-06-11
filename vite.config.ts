@@ -4,9 +4,15 @@ import { resolve } from 'path';
 
 export default defineConfig({
   plugins: [react()],
+  server: {
+    port: 3000,
+    host: '0.0.0.0'
+  },
   build: {
     outDir: 'dist',
     emptyOutDir: true,
+    sourcemap: true,
+    minify: false,
     rollupOptions: {
       input: {
         dashboard: resolve(__dirname, 'index.html'),
