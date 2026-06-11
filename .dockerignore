@@ -1,6 +1,0 @@
-.git
-output/
-*.log
-.DS_Store
-.env
-config.json

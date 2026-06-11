@@ -1,0 +1,65 @@
+{
+  "manifest_version": 3,
+  "name": "AutoApplyAI Bot",
+  "version": "2.0.0",
+  "description": "Automatically extracts job details and tailors resumes using client-side AI and Firestore.",
+  "permissions": [
+    "storage",
+    "identity",
+    "sidePanel",
+    "tabs",
+    "scripting"
+  ],
+  "externally_connectable": {
+    "matches": [
+      "https://autoapplyai-3e61d.web.app/*",
+      "http://localhost:5173/*"
+    ]
+  },
+  "host_permissions": [
+    "https://*.linkedin.com/*",
+    "https://*.indeed.com/*"
+  ],
+  "background": {
+    "service_worker": "background.js",
+    "type": "module"
+  },
+  "icons": {
+    "16": "icon-16.png",
+    "48": "icon-48.png",
+    "128": "icon-128.png"
+  },
+  "action": {
+    "default_icon": {
+      "16": "icon-16.png",
+      "48": "icon-48.png",
+      "128": "icon-128.png"
+    }
+  },
+  "side_panel": {
+    "default_path": "sidepanel.html"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "http://*/*",
+        "https://*/*"
+      ],
+      "js": ["content.js"],
+      "all_frames": true
+    }
+  ],
+  "web_accessible_resources": [
+    {
+      "resources": [
+        "icon-16.png",
+        "icon-48.png",
+        "icon-128.png",
+        "logo.png"
+      ],
+      "matches": [
+        "<all_urls>"
+      ]
+    }
+  ]
+}
