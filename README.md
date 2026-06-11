@@ -1,4 +1,4 @@
-# Resume Auto Apply Bot
+# AutoApplyAI Bot
 
 An automated resume tailoring system powered by Python/FastAPI, Google Gemini API, and Tectonic LaTeX typesetting. It enables 1-click tailored resume generation and PDF compilation directly from job listings (LinkedIn, Indeed) via a Chrome Extension and an elegant glassmorphic dashboard.
 
@@ -215,7 +215,7 @@ The server will start at [http://localhost:3000](http://localhost:3000).
 1. Open Google Chrome on your Mac and navigate to `chrome://extensions/`.
 2. Enable **Developer mode** using the toggle switch in the top-right.
 3. Click **Load unpacked** in the top-left.
-4. Select the `extension` folder inside the cloned `antigravity-apply-bot` directory.
+4. Select the `dist` folder inside the cloned `AutoApplyAI` directory.
 
 The extension is now ready. It will automatically detect whether port `3000` (native) or port `8000` (Docker) is active.
 
