@@ -788,7 +788,7 @@ ${job.coverLetter}
       /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { style: { display: "flex", flexDirection: "column", alignItems: "center", gap: 12 }, children: [
         /* @__PURE__ */ jsxRuntimeExports.jsx("img", { src: "/logo.png", alt: "AutoApplyAI Logo", style: { width: 48, height: 48, objectFit: "contain", borderRadius: 8 } }),
         /* @__PURE__ */ jsxRuntimeExports.jsx("h1", { style: { fontFamily: "var(--font-title)", fontSize: "1.6rem", fontWeight: 800, background: "linear-gradient(to right, var(--text-primary), var(--brand-color))", WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent" }, children: "AutoApplyAI" }),
-        /* @__PURE__ */ jsxRuntimeExports.jsx("p", { style: { color: "var(--text-secondary)", fontSize: "0.88rem", lineHeight: 1.5, marginTop: 4 }, children: "Accelerate your job application journey. Tailor resumes and auto-sync to Cloud Firestore." })
+        /* @__PURE__ */ jsxRuntimeExports.jsx("p", { style: { color: "var(--text-secondary)", fontSize: "0.88rem", lineHeight: 1.5, marginTop: 4 }, children: "Accelerate your job application journey. Tailor resumes and auto-sync to Cloud." })
       ] }),
       /* @__PURE__ */ jsxRuntimeExports.jsx("div", { style: { borderTop: "1px solid var(--panel-border)", paddingTop: 16 }, children: /* @__PURE__ */ jsxRuntimeExports.jsxs(
         "button",
@@ -1476,4 +1476,4 @@ window.addEventListener("unhandledrejection", (event) => {
 client.createRoot(document.getElementById("root")).render(
   /* @__PURE__ */ jsxRuntimeExports.jsx(React.StrictMode, { children: /* @__PURE__ */ jsxRuntimeExports.jsx(App, {}) })
 );
-//# sourceMappingURL=dashboard-C7BS6evr.js.map
+//# sourceMappingURL=dashboard-iPAaD239.js.map

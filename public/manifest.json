@@ -15,8 +15,7 @@
     "matches": [
       "https://autoapplyai-3e61d.web.app/*",
       "http://localhost:5173/*",
-      "http://localhost:3000/*",
-      "https://autoapplyai.is-a.dev/*"
+      "http://localhost:3000/*"
     ]
   },
   "host_permissions": [

@@ -161,19 +161,8 @@ async function saveLocalHistory(history) {
     localStorage.setItem("localHistory", JSON.stringify(history));
   }
 }
-const __vite_import_meta_env__ = { "BASE_URL": "/", "DEV": false, "MODE": "production", "PROD": true, "SSR": false, "VITE_FIREBASE_API_KEY": "AIzaSyAmeikvmS_z60M_gRE_9Xfi8CLkRas-i7U", "VITE_FIREBASE_APP_ID": "1:214768128640:web:55984bbc287b77ee034c65", "VITE_FIREBASE_AUTH_DOMAIN": "autoapplyai-3e61d.firebaseapp.com", "VITE_FIREBASE_MESSAGING_SENDER_ID": "214768128640", "VITE_FIREBASE_PROJECT_ID": "autoapplyai-3e61d", "VITE_FIREBASE_STORAGE_BUCKET": "autoapplyai-3e61d.firebasestorage.app" };
-const getIsDev = () => {
-  if (typeof chrome !== "undefined" && chrome.runtime && chrome.runtime.getManifest) {
-    try {
-      const manifest = chrome.runtime.getManifest();
-      return !("update_url" in manifest);
-    } catch (e) {
-    }
-  }
-  return typeof import.meta !== "undefined" && __vite_import_meta_env__ && false;
-};
 const appConfig = {
-  DASHBOARD_URL: getIsDev() ? "http://localhost:3000/login" : "https://autoapplyai.is-a.dev/login"
+  DASHBOARD_URL: "https://autoapplyai-3e61d.web.app/login"
 };
 const DEFAULT_RULES = {
   profile: {
@@ -871,7 +860,7 @@ function App() {
       }
       const dashboardDomain = appConfig.DASHBOARD_URL.replace("http://", "").replace("https://", "").split("/")[0];
       const fallbackDomain = "autoapplyai-3e61d.web.app";
-      const isDashboard = tab.url && (tab.url.includes(dashboardDomain) || tab.url.includes(fallbackDomain) || tab.url.includes("autoapplyai.is-a.dev"));
+      const isDashboard = tab.url && (tab.url.includes(dashboardDomain) || tab.url.includes(fallbackDomain) || tab.url.includes("autoapplyai-3e61d.web.app"));
       if (isDashboard) {
         return;
       }
@@ -1267,7 +1256,7 @@ ${job.coverLetter}
       /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { style: { display: "flex", flexDirection: "column", alignItems: "center", gap: 12 }, children: [
         /* @__PURE__ */ jsxRuntimeExports.jsx("img", { src: "/logo.png", alt: "AutoApplyAI Logo", style: { width: 48, height: 48, objectFit: "contain", borderRadius: 8 } }),
         /* @__PURE__ */ jsxRuntimeExports.jsx("h1", { style: { fontFamily: "var(--font-title)", fontSize: "1.6rem", fontWeight: 800, background: "linear-gradient(to right, var(--text-primary), var(--brand-color))", WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent" }, children: "AutoApplyAI" }),
-        /* @__PURE__ */ jsxRuntimeExports.jsx("p", { style: { color: "var(--text-secondary)", fontSize: "0.88rem", lineHeight: 1.5, marginTop: 4 }, children: "Accelerate your job application journey. Tailor resumes and auto-sync to Cloud Firestore." })
+        /* @__PURE__ */ jsxRuntimeExports.jsx("p", { style: { color: "var(--text-secondary)", fontSize: "0.88rem", lineHeight: 1.5, marginTop: 4 }, children: "Accelerate your job application journey. Tailor resumes and auto-sync to Cloud." })
       ] }),
       /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { style: { borderTop: "1px solid var(--panel-border)", paddingTop: 16, display: "flex", flexDirection: "column", gap: 10 }, children: [
         /* @__PURE__ */ jsxRuntimeExports.jsxs(
@@ -2214,4 +2203,4 @@ window.addEventListener("unhandledrejection", (event) => {
 client.createRoot(document.getElementById("root")).render(
   /* @__PURE__ */ jsxRuntimeExports.jsx(React.StrictMode, { children: /* @__PURE__ */ jsxRuntimeExports.jsx(App, {}) })
 );
-//# sourceMappingURL=sidepanel-B6WuEa9m.js.map
+//# sourceMappingURL=sidepanel-UTL0vYu7.js.map
