@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "AutoApplyAI Bot",
-  "version": "2.0.0",
+  "version": "2.0.3",
   "description": "Automatically extracts job details and tailors resumes using client-side AI",
   "permissions": [
     "storage",
@@ -21,7 +21,24 @@
   "host_permissions": [
     "https://*.linkedin.com/*",
     "https://*.googleapis.com/*",
-    "https://*.indeed.com/*"
+    "https://identitytoolkit.googleapis.com/*",
+    "https://securetoken.googleapis.com/*",
+    "https://*.indeed.com/*",
+    "https://*.greenhouse.io/*",
+    "https://*.myworkdayjobs.com/*",
+    "https://*.workday.com/*",
+    "https://*.ashbyhq.com/*",
+    "https://jobs.lever.co/*",
+    "https://*.lever.co/*",
+    "https://*.smartrecruiters.com/*",
+    "https://*.glassdoor.com/*",
+    "https://*.ziprecruiter.com/*",
+    "https://*.monster.com/*",
+    "https://api.openai.com/*",
+    "https://api.anthropic.com/*",
+    "https://api.x.ai/*",
+    "https://*.ingest.us.sentry.io/*",
+    "https://*.ingest.sentry.io/*"
   ],
   "oauth2": {
     "client_id": "214768128640-iltgm9frri1j2d9luvm6be4p5f6rgbqo.apps.googleusercontent.com",
@@ -68,7 +85,8 @@
         "icon-16.png",
         "icon-48.png",
         "icon-128.png",
-        "logo.png"
+        "logo.png",
+        "logo-dark.png"
       ],
       "matches": [
         "<all_urls>"

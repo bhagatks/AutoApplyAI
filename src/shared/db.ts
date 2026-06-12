@@ -5,6 +5,7 @@ import {
   doc,
   setDoc,
   getDoc,
+  getDocs,
   deleteDoc,
   onSnapshot,
   query,
@@ -13,14 +14,75 @@ import {
   Firestore,
   Unsubscribe
 } from 'firebase/firestore';
+import { User, Auth } from 'firebase/auth';
+import { getAuthForApp, signInWithChromeAccessToken, signInWithGoogleCredential } from './firebase-auth-bridge';
+import { Job, ResumeRules, BaseProfile, CloudApiKeyDoc, CustomerConfig, TailoredResume } from './types';
 import {
-  getAuth,
-  GoogleAuthProvider,
-  signInWithCredential,
-  User,
-  Auth
-} from 'firebase/auth';
-import { Job, ResumeRules, BaseProfile, CloudApiKeyDoc, CustomerConfig } from './types';
+  CoreCompetencyCatalog,
+  CoreCompetencyEntry,
+  UserCompetencyProfile,
+  emptyUserCompetencyProfile,
+  getBundledCoreCompetencyCatalog,
+} from './competency-catalog';
+import {
+  CoreSkillCatalog,
+  CoreSkillEntry,
+  UserSkillProfile,
+  emptyUserSkillProfile,
+  getBundledCoreSkillCatalog,
+} from './skill-catalog';
+import { stripUndefinedForFirestore } from './utils';
+
+const PERMISSION_DENIED_CODE = 'permission-denied';
+
+async function ensureFirestoreAuth(userId: string): Promise<boolean> {
+  if (!auth?.currentUser) return false;
+  if (auth.currentUser.uid !== userId) {
+    console.warn('Firestore auth UID mismatch. Expected', userId, 'but got', auth.currentUser.uid);
+    return false;
+  }
+  try {
+    await auth.currentUser.getIdToken(true);
+    return true;
+  } catch (err) {
+    console.warn('Failed to refresh Firebase auth token before Firestore access:', err);
+    return false;
+  }
+}
+
+async function getDocWithAuth(docRef: ReturnType<typeof doc>, userId: string) {
+  if (!(await ensureFirestoreAuth(userId))) {
+    return null;
+  }
+  try {
+    return await getDoc(docRef);
+  } catch (err: any) {
+    if (err?.code === PERMISSION_DENIED_CODE && auth?.currentUser) {
+      try {
+        await auth.currentUser.getIdToken(true);
+        return await getDoc(docRef);
+      } catch (retryErr) {
+        throw retryErr;
+      }
+    }
+    throw err;
+  }
+}
+
+function logFirestoreAccessError(operation: string, err: any): void {
+  if (err?.code === PERMISSION_DENIED_CODE) {
+    console.warn(
+      `Firestore ${operation} permission denied. Ensure you are signed in and Firestore rules are deployed (firebase deploy --only firestore:rules).`,
+      err
+    );
+    return;
+  }
+  if (err && (err.code === 'unavailable' || err.message?.includes('offline'))) {
+    console.warn(`Firestore is offline during ${operation}.`, err.message || err);
+    return;
+  }
+  console.error(`Firestore ${operation} failed:`, err);
+}
 
 // Default Firebase Configuration (can be populated via build-time env vars)
 const defaultFirebaseConfig = {
@@ -39,7 +101,7 @@ export let db: Firestore | null = null;
 if (defaultFirebaseConfig.apiKey) {
   try {
     app = getApps().length === 0 ? initializeApp(defaultFirebaseConfig) : getApp();
-    auth = getAuth(app);
+    auth = getAuthForApp(app);
     db = initializeFirestore(app, {
       experimentalForceLongPolling: true // Force HTTP long polling for reliable Chrome Extension socket connections
     });
@@ -53,17 +115,17 @@ if (defaultFirebaseConfig.apiKey) {
 // Firebase Authentication helper using Chrome Identity token (for the Chrome Extension context)
 export async function signInWithChromeToken(token: string): Promise<User | null> {
   if (!auth) return null;
-  const credential = GoogleAuthProvider.credential(null, token);
-  const userCredential = await signInWithCredential(auth, credential);
-  return userCredential.user;
+  return signInWithChromeAccessToken(auth, token);
 }
 
 // Firebase Authentication helper using ID and Access Tokens from Web-to-Extension Sync
 export async function signInWithGoogleTokens(idToken: string | null, accessToken: string | null): Promise<User | null> {
   if (!auth) return null;
-  const credential = GoogleAuthProvider.credential(idToken, accessToken);
-  const userCredential = await signInWithCredential(auth, credential);
-  return userCredential.user;
+  return signInWithGoogleCredential(auth, idToken, accessToken);
+}
+
+export async function prepareFirestoreAccess(userId: string): Promise<boolean> {
+  return ensureFirestoreAuth(userId);
 }
 
 // Set or update user resume rules
@@ -82,16 +144,12 @@ export async function getUserRules(userId: string): Promise<ResumeRules | null> 
   if (!db) return null;
   try {
     const docRef = doc(db, 'users', userId, 'config', 'resumeRules');
-    const snap = await getDoc(docRef);
-    if (snap.exists()) {
+    const snap = await getDocWithAuth(docRef, userId);
+    if (snap?.exists()) {
       return snap.data() as ResumeRules;
     }
   } catch (err: any) {
-    if (err && (err.code === 'unavailable' || err.message?.includes('offline'))) {
-      console.warn('Firestore is offline. Falling back to local rules caching.', err.message || err);
-    } else {
-      console.error('Firestore getUserRules failed:', err);
-    }
+    logFirestoreAccessError('getUserRules', err);
   }
   return null;
 }
@@ -116,16 +174,12 @@ export async function getUserProfile(userId: string): Promise<BaseProfile | null
   if (!db) return null;
   try {
     const docRef = doc(db, 'users', userId, 'config', 'candidateProfile');
-    const snap = await getDoc(docRef);
-    if (snap.exists()) {
+    const snap = await getDocWithAuth(docRef, userId);
+    if (snap?.exists()) {
       return snap.data() as BaseProfile;
     }
   } catch (err: any) {
-    if (err && (err.code === 'unavailable' || err.message?.includes('offline'))) {
-      console.warn('Firestore is offline. Falling back to local profile caching.', err.message || err);
-    } else {
-      console.error('Firestore getUserProfile failed:', err);
-    }
+    logFirestoreAccessError('getUserProfile', err);
   }
   return null;
 }
@@ -148,14 +202,57 @@ export async function saveJobToDb(userId: string, job: Job): Promise<void> {
 export async function deleteJobFromDb(userId: string, jobId: string): Promise<void> {
   if (!db) return;
   try {
-    const docRef = doc(db, 'users', userId, 'jobs', jobId);
-    await deleteDoc(docRef);
+    const jobRef = doc(db, 'users', userId, 'jobs', jobId);
+    const snap = await getDocWithAuth(jobRef, userId);
+    const resumeId = snap?.data()?.resumeId as string | undefined;
+    if (resumeId) {
+      await deleteDoc(doc(db, 'users', userId, 'resumes', resumeId));
+    }
+    await deleteDoc(jobRef);
   } catch (err: any) {
     if (err && (err.code === 'unavailable' || err.message?.includes('offline'))) {
       console.warn('Firestore is offline. Job deletion queued locally.', err.message || err);
     } else {
       console.error('Firestore deleteJobFromDb failed:', err);
     }
+  }
+}
+
+// Per-job tailored resume artifacts at users/{userId}/resumes/{resumeId}
+export async function saveTailoredResume(userId: string, resume: TailoredResume): Promise<void> {
+  if (!db) return;
+  try {
+    const docRef = doc(db, 'users', userId, 'resumes', resume.id);
+    await setDoc(docRef, stripUndefinedForFirestore({ ...resume, updatedAt: new Date().toISOString() }));
+  } catch (err: any) {
+    if (err && (err.code === 'unavailable' || err.message?.includes('offline'))) {
+      console.warn('Firestore is offline. Tailored resume save queued locally.', err.message || err);
+    } else {
+      console.error('Firestore saveTailoredResume failed:', err);
+    }
+  }
+}
+
+export async function getTailoredResume(userId: string, resumeId: string): Promise<TailoredResume | null> {
+  if (!db) return null;
+  try {
+    const docRef = doc(db, 'users', userId, 'resumes', resumeId);
+    const snap = await getDocWithAuth(docRef, userId);
+    if (snap?.exists()) {
+      return snap.data() as TailoredResume;
+    }
+  } catch (err: any) {
+    logFirestoreAccessError('getTailoredResume', err);
+  }
+  return null;
+}
+
+export async function deleteTailoredResumeFromDb(userId: string, resumeId: string): Promise<void> {
+  if (!db) return;
+  try {
+    await deleteDoc(doc(db, 'users', userId, 'resumes', resumeId));
+  } catch (err: any) {
+    logFirestoreAccessError('deleteTailoredResumeFromDb', err);
   }
 }
 
@@ -187,6 +284,28 @@ export function subscribeToJobs(
   );
 }
 
+export async function getJobsFromDb(userId: string, maxLimit = 50): Promise<Job[]> {
+  if (!db) return [];
+  if (!(await ensureFirestoreAuth(userId))) return [];
+
+  try {
+    const q = query(
+      collection(db, 'users', userId, 'jobs'),
+      orderBy('date', 'desc'),
+      limit(maxLimit)
+    );
+    const snapshot = await getDocs(q);
+    const jobs: Job[] = [];
+    snapshot.forEach((snapDoc) => {
+      jobs.push(snapDoc.data() as Job);
+    });
+    return jobs;
+  } catch (err: unknown) {
+    logFirestoreAccessError('getJobsFromDb', err);
+    return [];
+  }
+}
+
 // Set or update cloud Gemini API Key document
 export async function saveCloudApiKey(userId: string, keyDoc: CloudApiKeyDoc | null): Promise<void> {
   if (!db) return;
@@ -211,16 +330,12 @@ export async function getCloudApiKey(userId: string): Promise<CloudApiKeyDoc | n
   if (!db) return null;
   try {
     const docRef = doc(db, 'users', userId, 'config', 'apiKey');
-    const snap = await getDoc(docRef);
-    if (snap.exists()) {
+    const snap = await getDocWithAuth(docRef, userId);
+    if (snap?.exists()) {
       return snap.data() as CloudApiKeyDoc;
     }
   } catch (err: any) {
-    if (err && (err.code === 'unavailable' || err.message?.includes('offline'))) {
-      console.warn('Firestore is offline. Falling back to local API key storage.', err.message || err);
-    } else {
-      console.error('Firestore getCloudApiKey failed:', err);
-    }
+    logFirestoreAccessError('getCloudApiKey', err);
   }
   return null;
 }
@@ -230,7 +345,7 @@ export async function saveCustomerConfig(userId: string, config: CustomerConfig)
   if (!db) return;
   try {
     const docRef = doc(db, 'users', userId, 'config', 'customerConfig');
-    await setDoc(docRef, config);
+    await setDoc(docRef, stripUndefinedForFirestore(config));
   } catch (err: any) {
     if (err && (err.code === 'unavailable' || err.message?.includes('offline'))) {
       console.warn('Firestore is offline. Customer config sync failed.', err.message || err);
@@ -260,18 +375,161 @@ export async function getCustomerConfig(userId: string): Promise<CustomerConfig 
   if (!db) return null;
   try {
     const docRef = doc(db, 'users', userId, 'config', 'customerConfig');
-    // Race getDoc against a 4s timeout to prevent hanging on poor network
-    const snap = await withTimeout(getDoc(docRef), 4000, null);
-    if (snap && snap.exists()) {
+    const snap = await withTimeout(getDocWithAuth(docRef, userId), 4000, null);
+    if (snap?.exists()) {
       return snap.data() as CustomerConfig;
     }
   } catch (err: any) {
-    if (err && (err.code === 'unavailable' || err.message?.includes('offline'))) {
-      console.warn('Firestore is offline. Falling back to local customer config.', err.message || err);
-    } else {
-      console.error('Firestore getCustomerConfig failed:', err);
-    }
+    logFirestoreAccessError('getCustomerConfig', err);
   }
   return null;
+}
+
+// Bundled core competencies catalog (src/shared/core-competencies-seed.ts)
+// User selections: users/{userId}/config/userCompetencies — { catalogRefs, custom, updatedAt }
+
+const USER_COMPETENCIES_DOC = 'userCompetencies';
+
+export async function loadGlobalCoreCompetencyCatalog(): Promise<CoreCompetencyCatalog> {
+  return getBundledCoreCompetencyCatalog();
+}
+
+export async function prefetchGlobalCoreCompetencyCatalog(): Promise<CoreCompetencyCatalog> {
+  return getBundledCoreCompetencyCatalog();
+}
+
+export async function getUserCompetencyProfile(userId: string): Promise<UserCompetencyProfile> {
+  if (!db) return emptyUserCompetencyProfile();
+
+  if (!(await ensureFirestoreAuth(userId))) {
+    return emptyUserCompetencyProfile();
+  }
+
+  try {
+    const profileRef = doc(db, 'users', userId, 'config', USER_COMPETENCIES_DOC);
+    const snap = await getDocWithAuth(profileRef, userId);
+    if (!snap?.exists()) {
+      return emptyUserCompetencyProfile();
+    }
+
+    const data = snap.data();
+    return {
+      catalogRefs: Array.isArray(data.catalogRefs) ? data.catalogRefs : [],
+      custom: Array.isArray(data.custom) ? (data.custom as CoreCompetencyEntry[]) : [],
+      updatedAt: (data.updatedAt as string) ?? new Date().toISOString(),
+    };
+  } catch (err: any) {
+    logFirestoreAccessError('getUserCompetencyProfile', err);
+    return emptyUserCompetencyProfile();
+  }
+}
+
+export async function saveUserCompetencyProfile(
+  userId: string,
+  profile: UserCompetencyProfile,
+  options?: { requireFirestore?: boolean }
+): Promise<void> {
+  if (!db) {
+    if (options?.requireFirestore) {
+      throw new Error('Firestore is not configured.');
+    }
+    return;
+  }
+
+  if (!(await ensureFirestoreAuth(userId))) {
+    const err = new Error('Firestore auth is not ready for user competency profile sync.');
+    logFirestoreAccessError('saveUserCompetencyProfile', err);
+    if (options?.requireFirestore) throw err;
+    return;
+  }
+
+  try {
+    const profileRef = doc(db, 'users', userId, 'config', USER_COMPETENCIES_DOC);
+    const payload: UserCompetencyProfile = {
+      ...profile,
+      updatedAt: new Date().toISOString(),
+    };
+    await setDoc(profileRef, stripUndefinedForFirestore(payload));
+    console.log(
+      `[AutoApplyAI] Saved user competencies: ${payload.catalogRefs.length} catalog refs, ${payload.custom.length} custom at users/${userId}/config/${USER_COMPETENCIES_DOC}`
+    );
+  } catch (err: any) {
+    logFirestoreAccessError('saveUserCompetencyProfile', err);
+    if (options?.requireFirestore) throw err;
+  }
+}
+
+// Bundled core skills catalog (src/shared/core-skills-seed.ts)
+// User selections: users/{userId}/config/userSkills — { catalogRefs, custom, updatedAt }
+
+const USER_SKILLS_DOC = 'userSkills';
+
+export async function loadGlobalCoreSkillCatalog(): Promise<CoreSkillCatalog> {
+  return getBundledCoreSkillCatalog();
+}
+
+export async function prefetchGlobalCoreSkillCatalog(): Promise<CoreSkillCatalog> {
+  return getBundledCoreSkillCatalog();
+}
+
+export async function getUserSkillProfile(userId: string): Promise<UserSkillProfile> {
+  if (!db) return emptyUserSkillProfile();
+
+  if (!(await ensureFirestoreAuth(userId))) {
+    return emptyUserSkillProfile();
+  }
+
+  try {
+    const profileRef = doc(db, 'users', userId, 'config', USER_SKILLS_DOC);
+    const snap = await getDocWithAuth(profileRef, userId);
+    if (!snap?.exists()) {
+      return emptyUserSkillProfile();
+    }
+
+    const data = snap.data();
+    return {
+      catalogRefs: Array.isArray(data.catalogRefs) ? data.catalogRefs : [],
+      custom: Array.isArray(data.custom) ? (data.custom as CoreSkillEntry[]) : [],
+      updatedAt: (data.updatedAt as string) ?? new Date().toISOString(),
+    };
+  } catch (err: any) {
+    logFirestoreAccessError('getUserSkillProfile', err);
+    return emptyUserSkillProfile();
+  }
+}
+
+export async function saveUserSkillProfile(
+  userId: string,
+  profile: UserSkillProfile,
+  options?: { requireFirestore?: boolean }
+): Promise<void> {
+  if (!db) {
+    if (options?.requireFirestore) {
+      throw new Error('Firestore is not configured.');
+    }
+    return;
+  }
+
+  if (!(await ensureFirestoreAuth(userId))) {
+    const err = new Error('Firestore auth is not ready for user skill profile sync.');
+    logFirestoreAccessError('saveUserSkillProfile', err);
+    if (options?.requireFirestore) throw err;
+    return;
+  }
+
+  try {
+    const profileRef = doc(db, 'users', userId, 'config', USER_SKILLS_DOC);
+    const payload: UserSkillProfile = {
+      ...profile,
+      updatedAt: new Date().toISOString(),
+    };
+    await setDoc(profileRef, stripUndefinedForFirestore(payload));
+    console.log(
+      `[AutoApplyAI] Saved user skills: ${payload.catalogRefs.length} catalog refs, ${payload.custom.length} custom at users/${userId}/config/${USER_SKILLS_DOC}`
+    );
+  } catch (err: any) {
+    logFirestoreAccessError('saveUserSkillProfile', err);
+    if (options?.requireFirestore) throw err;
+  }
 }
 

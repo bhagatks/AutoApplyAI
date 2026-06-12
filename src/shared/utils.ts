@@ -147,7 +147,7 @@ export function injectTokensIntoTemplate(
   }
 ): string {
   let content = templateContent;
-  const { jobTitle, summary, competencies, rules, profile, keywords } = tokens;
+  const { jobTitle, summary, competencies, rules, profile } = tokens;
 
   // 1. Remove quote environment if forbidden
   const forbiddenEnvs = rules.page_defense_layout?.forbidden_environments || [];
@@ -175,12 +175,12 @@ export function injectTokensIntoTemplate(
   content = content.replace(/%TOKEN_CVS_TITLE_ZONE%/g, finalCVS);
 
   // 4. Inject candidate name and contact details dynamically
-  const cleanFirstName = cleanLatex(profile.firstName || 'Bhagath', rules);
-  const cleanLastName = cleanLatex(profile.lastName || 'Siddi', rules);
-  const cleanEmail = cleanLatex(profile.email || 'bhagathsiddi@gmail.com', rules);
+  const cleanFirstName = cleanLatex(profile.firstName || 'f_name', rules);
+  const cleanLastName = cleanLatex(profile.lastName || 'l_name', rules);
+  const cleanEmail = cleanLatex(profile.email || 'f_namel_name@gmail.com', rules);
   const cleanPhone = cleanLatex(profile.phone || '555-555-5555', rules);
   const cleanLocation = cleanLatex(profile.location || 'Prosper, TX 75078', rules);
-  const cleanLinkedin = cleanLatex(profile.linkedin || 'linkedin.com/in/bhagathsiddi', rules);
+  const cleanLinkedin = cleanLatex(profile.linkedin || 'linkedin.com/in/f_namel_name', rules);
   
   content = content.replace(/%TOKEN_FIRST_NAME%/g, cleanFirstName);
   content = content.replace(/%TOKEN_LAST_NAME%/g, cleanLastName);
@@ -201,14 +201,25 @@ export function injectTokensIntoTemplate(
   const listSpacing = rules.page_defense_layout?.list_spacing || 'noitemsep, topsep=0pt, parsep=0pt, partopsep=0pt, leftmargin=11pt';
   content = content.replace(/\\setlist\[itemize\]\{[^}]*\}/g, `\\setlist[itemize]{${listSpacing}}`);
 
-  // 7. Inject ATS target block if enabled
-  const atsTarget = rules.ats_target_block || {};
-  if (atsTarget.required && keywords && keywords.length > 0) {
-    const formatString = atsTarget.format_string || '\\footnotesize \\textbf{ATS STRATEGY MATCH TARGET:} 95\\%+ Optimization (Keywords: {keywords})';
-    const escapedKeywords = cleanLatex(keywords.join(', '), rules);
-    const atsBlock = formatString.replace('{keywords}', escapedKeywords);
-    content = content.replace(/\\end\{document\}/g, `${atsBlock}\n\\end{document}`);
-  }
-
   return content;
+}
+
+/** Firestore rejects undefined field values — strip them recursively before setDoc. */
+export function stripUndefinedForFirestore<T>(value: T): T {
+  if (value === undefined) {
+    return value;
+  }
+  if (Array.isArray(value)) {
+    return value.map((item) => stripUndefinedForFirestore(item)) as T;
+  }
+  if (value !== null && typeof value === 'object') {
+    const result: Record<string, unknown> = {};
+    for (const [key, val] of Object.entries(value as Record<string, unknown>)) {
+      if (val !== undefined) {
+        result[key] = stripUndefinedForFirestore(val);
+      }
+    }
+    return result as T;
+  }
+  return value;
 }

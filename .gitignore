@@ -1,2 +1,7 @@
 node_modules
 .env
+.env.local
+.env.*.local
+
+# Firebase Admin SDK service account (never commit)
+*firebase-adminsdk*.json

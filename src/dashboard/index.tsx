@@ -2,6 +2,10 @@ import React from 'react';
 import ReactDOM from 'react-dom/client';
 import App from './App';
 import '../sidepanel/style.css';
+import { initSentry } from '../shared/sentry';
+import { ErrorBoundary } from '@sentry/react';
+
+initSentry('dashboard');
 
 // Gracefully handle uncaught promise rejections, specifically Firebase offline/network errors
 window.addEventListener('unhandledrejection', (event) => {
@@ -21,7 +25,8 @@ window.addEventListener('unhandledrejection', (event) => {
 
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>
-    <App />
+    <ErrorBoundary fallback={<p>Something went wrong. Reload the page.</p>}>
+      <App />
+    </ErrorBoundary>
   </React.StrictMode>
 );
-
