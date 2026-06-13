@@ -6,6 +6,7 @@ import { formatAiErrorToast } from '../shared/ai-errors';
 import { executeTailorJob } from '../shared/tailor-job';
 import { Job } from '../shared/types';
 import { parsedResumeToBaseProfile } from '../shared/resume-types';
+import { setTraceSurface, traceLog } from '../shared/trace-logger';
 import {
   enqueuePipelineJob,
   processPipeline,
@@ -17,6 +18,8 @@ import {
 } from './pipeline-manager';
 import { loadPipelineSettings } from '../shared/pipeline-storage';
 import { resolveResumeRulesFromStorage } from '../shared/resume-builder-config';
+
+setTraceSurface('background');
 
 // Handle extension icon clicks by opening the sidepanel
 chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: true }).catch((err: any) => {
@@ -84,6 +87,12 @@ function updateWidgetState(
 }
 
 chrome.runtime.onMessage.addListener((message: any, sender: chrome.runtime.MessageSender, sendResponse: (response?: any) => void) => {
+  if (message.action && message.action !== 'APP_TRACE_LOG') {
+    traceLog.debug('MSG', message.action, 'background received message', {
+      tabId: sender.tab?.id,
+    });
+  }
+
   if (message.action === 'OPEN_SIDEPANEL') {
     (async () => {
       try {
@@ -112,6 +121,25 @@ chrome.runtime.onMessage.addListener((message: any, sender: chrome.runtime.Messa
   if (message.action === 'IS_SIDEPANEL_OPEN') {
     sendResponse({ open: sidepanelPort !== null });
     return;
+  }
+
+  if (message.action === 'GET_SUPPORT_REPORT_CONTEXT') {
+    (async () => {
+      try {
+        const manifest = chrome.runtime.getManifest();
+        const [activeTab] = await chrome.tabs.query({ active: true, currentWindow: true });
+        sendResponse({
+          success: true,
+          tabUrl: activeTab?.url || '',
+          extensionVersion: manifest.version,
+          userAgent: navigator.userAgent,
+        });
+      } catch (err: unknown) {
+        const error = err instanceof Error ? err.message : String(err);
+        sendResponse({ success: false, error });
+      }
+    })();
+    return true;
   }
 
   if (message.action === 'ENQUEUE_PIPELINE_JOB') {
@@ -187,6 +215,11 @@ chrome.runtime.onMessage.addListener((message: any, sender: chrome.runtime.Messa
   if (message.action === 'TAILOR_JOB') {
     const { jobDescription, jobUrl } = message;
     const tabId = sender.tab?.id;
+    traceLog.info('TAILOR', 'TAILOR_JOB', 'direct tailor request', {
+      tabId,
+      jdChars: jobDescription?.length,
+      jobUrl,
+    });
 
     // Start background processing
     (async () => {
@@ -245,6 +278,7 @@ chrome.runtime.onMessage.addListener((message: any, sender: chrome.runtime.Messa
         updateWidgetState(tabId, 4, 'success', '✓ Finished! Ready in side panel');
 
       } catch (err: any) {
+        traceLog.error('TAILOR', 'TAILOR_JOB', err?.message || String(err), { tabId });
         console.error('Tailoring error:', err);
         const friendlyMessage = formatAiErrorToast(err, {
           provider,
@@ -276,7 +310,7 @@ chrome.runtime.onMessageExternal.addListener((message: any, _sender: chrome.runt
 
     chrome.storage.local.set({ basic_user_config: basicUserConfig }, () => {
       sendResponse({ success: true });
-      console.log('[DEBUG LOG] Received GOOGLE_AUTH_SUCCESS in background. Tab left open for console inspection.');
+      traceLog.info('AUTH', 'GOOGLE_AUTH_SUCCESS', 'credentials stored from dashboard', { uid });
     });
     return true;
   }

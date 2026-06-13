@@ -4,6 +4,7 @@ import {
   collection,
   doc,
   setDoc,
+  addDoc,
   getDoc,
   getDocs,
   deleteDoc,
@@ -32,6 +33,7 @@ import {
   getBundledCoreSkillCatalog,
 } from './skill-catalog';
 import { stripUndefinedForFirestore } from './utils';
+import { traceAsync, traceLog } from './trace-logger';
 
 const PERMISSION_DENIED_CODE = 'permission-denied';
 const FIRESTORE_AUTH_RETRY_DELAYS_MS = [400, 1200, 2500];
@@ -231,12 +233,26 @@ export async function getUserProfile(userId: string): Promise<BaseProfile | null
   return null;
 }
 
+async function tracedFirestore<T>(
+  operation: string,
+  userId: string,
+  fn: () => Promise<T>
+): Promise<T> {
+  return traceAsync('FIRESTORE', operation, fn, { userId, ai: false });
+}
+
 // Firestore operations for jobs
 export async function saveJobToDb(userId: string, job: Job): Promise<void> {
-  if (!db) return;
+  if (!db) {
+    traceLog.warn('FIRESTORE', 'saveJobToDb', 'db not initialized');
+    return;
+  }
   try {
-    const docRef = doc(db, 'users', userId, 'jobs', job.id);
-    await setDoc(docRef, job);
+    await tracedFirestore('saveJobToDb', userId, async () => {
+      const docRef = doc(db!, 'users', userId, 'jobs', job.id);
+      await setDoc(docRef, stripUndefinedForFirestore(job));
+    });
+    traceLog.info('FIRESTORE', 'saveJobToDb', 'saved', { jobId: job.id, status: job.status });
   } catch (err: any) {
     if (err && (err.code === 'unavailable' || err.message?.includes('offline'))) {
       console.warn('Firestore is offline. Job save queued locally.', err.message || err);
@@ -267,10 +283,16 @@ export async function deleteJobFromDb(userId: string, jobId: string): Promise<vo
 
 // Per-job tailored resume artifacts at users/{userId}/resumes/{resumeId}
 export async function saveTailoredResume(userId: string, resume: TailoredResume): Promise<void> {
-  if (!db) return;
+  if (!db) {
+    traceLog.warn('FIRESTORE', 'saveTailoredResume', 'db not initialized');
+    return;
+  }
   try {
-    const docRef = doc(db, 'users', userId, 'resumes', resume.id);
-    await setDoc(docRef, stripUndefinedForFirestore({ ...resume, updatedAt: new Date().toISOString() }));
+    await tracedFirestore('saveTailoredResume', userId, async () => {
+      const docRef = doc(db!, 'users', userId, 'resumes', resume.id);
+      await setDoc(docRef, stripUndefinedForFirestore({ ...resume, updatedAt: new Date().toISOString() }));
+    });
+    traceLog.info('FIRESTORE', 'saveTailoredResume', 'saved', { resumeId: resume.id, jobId: resume.jobId });
   } catch (err: any) {
     if (err && (err.code === 'unavailable' || err.message?.includes('offline'))) {
       console.warn('Firestore is offline. Tailored resume save queued locally.', err.message || err);
@@ -389,10 +411,19 @@ export async function getCloudApiKey(userId: string): Promise<CloudApiKeyDoc | n
 
 // Set or update customer config document
 export async function saveCustomerConfig(userId: string, config: CustomerConfig): Promise<void> {
-  if (!db) return;
+  if (!db) {
+    traceLog.warn('FIRESTORE', 'saveCustomerConfig', 'db not initialized');
+    return;
+  }
   try {
-    const docRef = doc(db, 'users', userId, 'config', 'customerConfig');
-    await setDoc(docRef, stripUndefinedForFirestore(config));
+    await tracedFirestore('saveCustomerConfig', userId, async () => {
+      const docRef = doc(db!, 'users', userId, 'config', 'customerConfig');
+      await setDoc(docRef, stripUndefinedForFirestore(config));
+    });
+    traceLog.info('FIRESTORE', 'saveCustomerConfig', 'saved', {
+      aiProvider: config.aiProvider,
+      hasParsedResume: !!config.parsedResume,
+    });
   } catch (err: any) {
     if (err && (err.code === 'unavailable' || err.message?.includes('offline'))) {
       console.warn('Firestore is offline. Customer config sync failed.', err.message || err);
@@ -419,13 +450,20 @@ function withTimeout<T>(promise: Promise<T>, timeoutMs: number, fallbackValue: T
 
 // Retrieve customer config document
 export async function getCustomerConfig(userId: string): Promise<CustomerConfig | null> {
-  if (!db) return null;
+  if (!db) {
+    traceLog.warn('FIRESTORE', 'getCustomerConfig', 'db not initialized');
+    return null;
+  }
   try {
-    const docRef = doc(db, 'users', userId, 'config', 'customerConfig');
-    const snap = await withTimeout(getDocWithAuth(docRef, userId), 4000, null);
+    const snap = await tracedFirestore('getCustomerConfig', userId, () => {
+      const docRef = doc(db!, 'users', userId, 'config', 'customerConfig');
+      return withTimeout(getDocWithAuth(docRef, userId), 4000, null);
+    });
     if (snap?.exists()) {
+      traceLog.info('FIRESTORE', 'getCustomerConfig', 'loaded', { found: true });
       return snap.data() as CustomerConfig;
     }
+    traceLog.info('FIRESTORE', 'getCustomerConfig', 'not found', { found: false });
   } catch (err: any) {
     logFirestoreAccessError('getCustomerConfig', err);
   }
@@ -577,6 +615,128 @@ export async function saveUserSkillProfile(
   } catch (err: any) {
     logFirestoreAccessError('saveUserSkillProfile', err);
     if (options?.requireFirestore) throw err;
+  }
+}
+
+export interface SupportReportMailPayload {
+  to: string;
+  userId: string;
+  userEmail?: string;
+  category: string;
+  screen: string;
+  url: string;
+  details: string;
+  diagnostics?: {
+    extensionVersion: string;
+    userAgent: string;
+  };
+  message: {
+    subject: string;
+    text: string;
+    html: string;
+  };
+}
+
+function extractSupportEmailFromData(data: Record<string, unknown> | undefined): string | null {
+  if (!data) return null;
+  for (const key of ['email', 'address', 'value', 'to']) {
+    const value = data[key];
+    if (typeof value === 'string' && value.includes('@')) {
+      return value.trim();
+    }
+  }
+  return null;
+}
+
+export async function getSupportMailAddress(userId: string): Promise<string | null> {
+  if (!db) return null;
+  if (!(await ensureFirestoreAuth(userId))) return null;
+
+  const configDocIds = ['supportEmail', 'supportMail'];
+
+  async function readConfigDoc(docId: string) {
+    const configRef = doc(db!, 'appConfig', docId);
+    try {
+      return await getDoc(configRef);
+    } catch (err: unknown) {
+      const code = (err as { code?: string })?.code ?? '';
+      if (code === PERMISSION_DENIED_CODE && auth?.currentUser) {
+        if (!(await ensureFirestoreAuth(userId, true))) return null;
+        return await getDoc(configRef);
+      }
+      throw err;
+    }
+  }
+
+  try {
+    for (const docId of configDocIds) {
+      const snap = await readConfigDoc(docId);
+      if (!snap?.exists()) {
+        traceLog.debug('FIRESTORE', 'getSupportMailAddress', 'config doc missing', { docId });
+        continue;
+      }
+
+      const data = snap.data() as Record<string, unknown>;
+      if (data.status === false) {
+        traceLog.debug('FIRESTORE', 'getSupportMailAddress', 'config disabled', { docId });
+        continue;
+      }
+
+      const fromField = extractSupportEmailFromData(data);
+      if (fromField) {
+        traceLog.debug('FIRESTORE', 'getSupportMailAddress', 'resolved support email', { docId });
+        return fromField;
+      }
+    }
+
+    return null;
+  } catch (err: unknown) {
+    logFirestoreAccessError('getSupportMailAddress', err);
+    return null;
+  }
+}
+
+export async function submitSupportReportMail(payload: SupportReportMailPayload): Promise<string> {
+  if (!db) {
+    throw new Error('Firestore is not configured.');
+  }
+  if (!(await ensureFirestoreAuth(payload.userId))) {
+    throw new Error('You must be signed in to submit a report.');
+  }
+
+  try {
+    const mailDoc = stripUndefinedForFirestore({
+      // Trigger Email extension (firebase/firestore-send-email) reads these fields.
+      to: payload.to,
+      replyTo: payload.userEmail || undefined,
+      message: {
+        subject: payload.message.subject,
+        text: payload.message.text,
+        html: payload.message.html,
+      },
+      // App metadata for dashboards / custom workers.
+      source: 'extension',
+      reportType: 'support',
+      userId: payload.userId,
+      userEmail: payload.userEmail,
+      category: payload.category,
+      screen: payload.screen,
+      url: payload.url || undefined,
+      details: payload.details,
+      diagnostics: payload.diagnostics,
+      createdAt: new Date().toISOString(),
+      status: 'pending',
+    });
+
+    const ref = await addDoc(collection(db, 'mail'), mailDoc);
+    traceLog.info('FIRESTORE', 'submitSupportReportMail', 'queued support report', {
+      mailId: ref.id,
+      category: payload.category,
+    });
+    return ref.id;
+  } catch (err: unknown) {
+    logFirestoreAccessError('submitSupportReportMail', err);
+    throw err instanceof Error ? err : new Error('Failed to submit report.');
   }
 }
 

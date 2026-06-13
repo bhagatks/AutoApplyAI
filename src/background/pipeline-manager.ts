@@ -1,4 +1,5 @@
 import { BASE_PROFILE, AiProvider } from '../shared/ai';
+import { traceLog } from '../shared/trace-logger';
 import { classifyAiError } from '../shared/ai-errors';
 import { executeTailorJob } from '../shared/tailor-job';
 import { Job, ResumeRules, PipelineStage } from '../shared/types';
@@ -89,6 +90,7 @@ async function loadRuntimeConfig(): Promise<{
 async function runTailorForJob(job: Job): Promise<void> {
   if (state.activeTailorIds.has(job.id)) return;
   state.activeTailorIds.add(job.id);
+  traceLog.info('PIPELINE', 'tailor_job', 'starting tailor', { jobId: job.id, platform: job.platform });
 
   let provider: AiProvider = 'gemini';
   try {
@@ -153,12 +155,22 @@ async function runTailorForJob(job: Job): Promise<void> {
         forceRegenerate: true,
       });
       await updateJob(job.id, { ...withArtifacts, id: job.id });
+      traceLog.info('PIPELINE', 'tailor_job', 'tailor + artifacts complete', { jobId: job.id });
     } catch (artifactErr) {
+      traceLog.warn('PIPELINE', 'tailor_job', 'artifact save failed', {
+        jobId: job.id,
+        error: artifactErr instanceof Error ? artifactErr.message : String(artifactErr),
+      });
       console.warn('Background artifact save failed — sidepanel may retry:', artifactErr);
       chrome.runtime.sendMessage({ action: 'SAVE_JOB_ARTIFACTS', jobId: job.id }).catch(() => {});
     }
   } catch (err: unknown) {
     const classified = classifyAiError(err, { provider, context: 'tailoring' });
+    traceLog.error('PIPELINE', 'tailor_job', classified.message, {
+      jobId: job.id,
+      retryable: classified.retryable,
+      provider,
+    });
     const retryCount = (job.tailorRetryCount ?? 0) + 1;
 
     if (classified.retryable && retryCount <= 3) {
@@ -218,6 +230,7 @@ async function injectContentScript(tabId: number): Promise<void> {
 
 async function runApplyForJob(job: Job): Promise<void> {
   state.applyInProgress = true;
+  traceLog.info('PIPELINE', 'apply_job', 'starting assist apply', { jobId: job.id });
   try {
     await updateJob(job.id, { pipelineStage: 'applying' });
 
@@ -240,6 +253,11 @@ async function runApplyForJob(job: Job): Promise<void> {
       const questions = collectResp?.questions || [];
       if (questions.length && !Object.keys(customAnswers).length) {
         try {
+          traceLog.info('AI', 'application_answers', 'generating answers', {
+            jobId: job.id,
+            questionCount: questions.length,
+            ai: true,
+          });
           customAnswers = await generateApplicationAnswers(
             cfg.apiKey,
             cfg.provider,
@@ -313,9 +331,17 @@ export async function processPipeline(): Promise<void> {
 
   try {
     const settings = await loadPipelineSettings();
-    if (settings.paused) return;
+    if (settings.paused) {
+      traceLog.debug('PIPELINE', 'process', 'pipeline paused');
+      return;
+    }
 
     const queue = await loadPipelineQueue();
+    traceLog.debug('PIPELINE', 'process', 'tick', {
+      queueSize: queue.length,
+      activeTailors: state.activeTailorIds.size,
+      applyInProgress: state.applyInProgress,
+    });
 
     const orphanedTailoring = queue.filter(
       (j) => j.pipelineStage === 'tailoring' && !state.activeTailorIds.has(j.id)
@@ -381,6 +407,11 @@ export async function enqueuePipelineJob(input: {
   queue.unshift(job);
   await savePipelineQueue(queue);
   broadcastPipelineUpdated();
+  traceLog.info('PIPELINE', 'enqueue', 'job queued', {
+    jobId: job.id,
+    platform,
+    jdChars: input.jobDescription.length,
+  });
   void processPipeline();
   return job;
 }

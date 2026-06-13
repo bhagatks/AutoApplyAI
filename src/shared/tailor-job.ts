@@ -2,6 +2,7 @@ import { runPass1Generate, runPass2Optimize, AiProvider } from './ai';
 import { createAiHttpError, formatAiErrorToast } from './ai-errors';
 import { cleanLatex, substituteForbiddenWords } from './utils';
 import { saveJobToDb, saveTailoredResume } from './db';
+import { traceLog } from './trace-logger';
 import { ParsedResume, getParsedResumeBaseVersion, formatExperienceForPrompt } from './resume-types';
 import { BaseProfile, Job, ResumeRules, TailoredResume, TailoredExperienceEntry } from './types';
 import {
@@ -191,9 +192,18 @@ export async function executeTailorJob(options: TailorJobOptions): Promise<Tailo
   await persistJobAndResume(userId, job, resume);
   await notifyJobUpdate(onJobUpdate, job);
 
+  traceLog.info('TAILOR', 'execute', 'tailor pipeline started', {
+    jobId,
+    provider,
+    model,
+    jdChars: jobDescription.length,
+    hasParsedResume: !!parsedResume,
+  });
+
   const experienceBlock = parsedResume ? formatExperienceForPrompt(parsedResume) : '';
 
   try {
+    traceLog.info('AI', 'pass1', 'starting pass 1 generate', { jobId, ai: true });
     const pass1Result = await runPass1Generate(
       apiKey,
       jobDescription,
@@ -223,6 +233,13 @@ export async function executeTailorJob(options: TailorJobOptions): Promise<Tailo
     await persistJobAndResume(userId, job, resume);
     await notifyJobUpdate(onJobUpdate, job);
 
+    traceLog.info('AI', 'pass1', 'pass 1 complete', {
+      jobId,
+      jobTitle: job.jobTitle,
+      companyName: job.companyName,
+    });
+
+    traceLog.info('AI', 'pass2', 'starting pass 2 optimize', { jobId, ai: true });
     const pass2Result = await runPass2Optimize(
       apiKey,
       jobDescription,
@@ -292,12 +309,19 @@ export async function executeTailorJob(options: TailorJobOptions): Promise<Tailo
     await persistJobAndResume(userId, job, resume);
     await notifyJobUpdate(onJobUpdate, job);
 
+    traceLog.info('TAILOR', 'execute', 'tailor pipeline complete', {
+      jobId,
+      matchScore,
+      status: 'completed',
+    });
+
     return { job, resume };
   } catch (err: any) {
     const message = formatAiErrorToast(err, {
       provider,
       context: 'tailoring',
     });
+    traceLog.error('TAILOR', 'execute', message, { jobId, provider, status: 'failed' });
     const now = new Date().toISOString();
 
     resume = {

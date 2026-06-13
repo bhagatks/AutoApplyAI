@@ -23,7 +23,8 @@
     "pdf-lib": "^1.17.1",
     "pdfjs-dist": "^6.0.227",
     "react": "^18.2.0",
-    "react-dom": "^18.2.0"
+    "react-dom": "^18.2.0",
+    "zod": "^4.4.3"
   },
   "devDependencies": {
     "@tailwindcss/vite": "^4.3.0",

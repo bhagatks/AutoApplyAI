@@ -20,32 +20,44 @@ async function getPdfJs() {
   return pdfjsReady;
 }
 
-function layoutPdfPageText(items: PdfTextItem[]): string {
-  const positioned = items
-    .filter((item) => item.str?.trim())
-    .map((item) => ({
-      str: item.str!.trim(),
-      x: item.transform?.[4] ?? 0,
-      y: item.transform?.[5] ?? 0,
-      hasEOL: Boolean(item.hasEOL),
-    }));
+type PositionedPdfItem = {
+  str: string;
+  x: number;
+  y: number;
+  hasEOL: boolean;
+};
 
-  if (!positioned.length) return '';
+/** Single-column pages: sort by Y (top→bottom) then X (left→right) with line-gap breaks. */
+function layoutSingleColumnPdfText(items: PositionedPdfItem[]): string {
+  if (!items.length) return '';
 
-  const xs = positioned.map((p) => p.x);
-  const minX = Math.min(...xs);
-  const maxX = Math.max(...xs);
-  const pageWidth = maxX - minX;
-  const midX = minX + pageWidth / 2;
+  items.sort((a, b) => {
+    const yThreshold = 5;
+    if (Math.abs(a.y - b.y) < yThreshold) return a.x - b.x;
+    return b.y - a.y;
+  });
 
-  // Two-column layout: process left column top-to-bottom, then right column.
-  const useColumns = pageWidth > 200 && positioned.some((p) => p.x < midX - 20) && positioned.some((p) => p.x > midX + 20);
+  let lastY = -1;
+  let pageText = '';
 
-  const columns: typeof positioned[] = useColumns
-    ? [positioned.filter((p) => p.x < midX), positioned.filter((p) => p.x >= midX)]
-    : [positioned];
+  for (const item of items) {
+    if (lastY !== -1 && Math.abs(item.y - lastY) > 8) {
+      pageText += '\n';
+    } else if (lastY !== -1 && item.str.trim().length > 0) {
+      pageText += ' ';
+    }
+    pageText += item.str;
+    lastY = item.y;
+  }
 
+  return pageText;
+}
+
+/** Multi-column resumes: read left column top→bottom, then right column (preserves header order). */
+function layoutMultiColumnPdfText(items: PositionedPdfItem[], midX: number): string {
+  const columns = [items.filter((p) => p.x < midX), items.filter((p) => p.x >= midX)];
   const columnTexts: string[] = [];
+
   for (const column of columns) {
     column.sort((a, b) => {
       const yDiff = b.y - a.y;
@@ -78,6 +90,34 @@ function layoutPdfPageText(items: PdfTextItem[]): string {
   }
 
   return columnTexts.filter(Boolean).join('\n\n');
+}
+
+function layoutPdfPageText(items: PdfTextItem[]): string {
+  const positioned: PositionedPdfItem[] = items
+    .filter((item) => item.str?.trim())
+    .map((item) => ({
+      str: item.str!.trim(),
+      x: item.transform?.[4] ?? 0,
+      y: item.transform?.[5] ?? 0,
+      hasEOL: Boolean(item.hasEOL),
+    }));
+
+  if (!positioned.length) return '';
+
+  const xs = positioned.map((p) => p.x);
+  const minX = Math.min(...xs);
+  const maxX = Math.max(...xs);
+  const pageWidth = maxX - minX;
+  const midX = minX + pageWidth / 2;
+
+  const useColumns =
+    pageWidth > 200 &&
+    positioned.some((p) => p.x < midX - 20) &&
+    positioned.some((p) => p.x > midX + 20);
+
+  return useColumns
+    ? layoutMultiColumnPdfText(positioned, midX)
+    : layoutSingleColumnPdfText(positioned);
 }
 
 export interface PdfExtractionResult {

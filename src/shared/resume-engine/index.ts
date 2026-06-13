@@ -8,5 +8,6 @@ export * from './fit-bands';
 export * from './platform-format';
 export * from './export-pdf';
 export * from './export-docx';
+export * from './export-master';
 export * from './export-tex';
 export * from './export-cover-letter';
