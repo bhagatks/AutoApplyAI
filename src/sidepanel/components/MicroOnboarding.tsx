@@ -41,7 +41,19 @@ import {
 } from './onboarding-validation';
 import { ToastStack, useToast } from '../../shared/Toast';
 import BrandLockup from '../../shared/BrandLockup';
-import { saveOutputDirHandle } from '../../shared/artifacts';
+import { loadOutputDirHandle, saveOutputDirHandle } from '../../shared/artifacts';
+import {
+  OUTPUT_DIR_PICKED_ACTION,
+  openDirectoryPickerTab,
+  requestDirectoryHandle,
+  directoryPickerFailureMessage,
+} from '../../shared/directory-picker';
+import {
+  loadOnboardingDraftApiKeys,
+  loadOnboardingDraftProvider,
+  saveOnboardingDraftApiKey,
+  saveOnboardingDraftProvider,
+} from '../../shared/onboarding-local-draft';
 import {
   buildResumeRulesForCustomer,
 } from '../../shared/resume-builder-config';
@@ -51,11 +63,13 @@ import {
   isOnboardingDevInjectEnabled,
   ONBOARDING_DEV_REMINDER,
 } from '../../dev/onboardingDevKeys';
+import { ReportProblemIconButton } from './ReportProblemModal';
 
 interface MicroOnboardingProps {
   userId: string;
   onComplete: (config: CustomerConfig) => void;
   onSignOut?: () => void | Promise<void>;
+  onOpenReport?: () => void;
   initialProfile?: {
     firstName?: string;
     lastName?: string;
@@ -64,7 +78,7 @@ interface MicroOnboardingProps {
   initialConfig?: CustomerConfig | null;
 }
 
-export default function MicroOnboarding({ userId, onComplete, onSignOut, initialProfile, initialConfig }: MicroOnboardingProps) {
+export default function MicroOnboarding({ userId, onComplete, onSignOut, onOpenReport, initialProfile, initialConfig }: MicroOnboardingProps) {
   const [isSigningOut, setIsSigningOut] = useState(false);
   const [aiProvider, setAiProvider] = useState<'gemini' | 'openai' | 'anthropic' | 'grok'>(() =>
     initialConfig?.aiProvider || 'gemini'
@@ -275,11 +289,61 @@ export default function MicroOnboarding({ userId, onComplete, onSignOut, initial
     }
   }, [initialConfig, initialProfile]);
 
+  useEffect(() => {
+    let cancelled = false;
+    loadOutputDirHandle().then((handle) => {
+      if (cancelled || !handle?.name) return;
+      setDirHandle(handle);
+      setOutputDir((prev) => prev || handle.name);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (typeof chrome === 'undefined' || !chrome.runtime?.onMessage) return;
+
+    const onMessage = (message: { action?: string; name?: string }) => {
+      if (message.action !== OUTPUT_DIR_PICKED_ACTION || !message.name) return;
+      setOutputDir(message.name);
+      void loadOutputDirHandle().then((handle) => {
+        if (handle) setDirHandle(handle);
+      });
+      showToast(`Output folder set to "${message.name}"`, 'success');
+    };
+
+    chrome.runtime.onMessage.addListener(onMessage);
+    return () => {
+      chrome.runtime.onMessage.removeListener(onMessage);
+    };
+  }, [showToast]);
+
+  const applyDraftApiKey = async (provider: AiProvider, options?: { markVerified?: boolean }) => {
+    const drafts = await loadOnboardingDraftApiKeys();
+    const key = drafts[provider]?.trim() || '';
+    if (!key) return false;
+    setGeminiApiKey(key);
+    if (options?.markVerified !== false) {
+      setIsKeyVerified(true);
+    }
+    return true;
+  };
+
   // Read local configurations if already exists partially
   useEffect(() => {
     const loadExisting = async () => {
+      const applyDraftIfNeeded = async () => {
+        if (initialConfig?.geminiApiKey?.trim() || devInjectActive) return;
+        const draftProvider = (await loadOnboardingDraftProvider()) || 'gemini';
+        const restored = await applyDraftApiKey(draftProvider);
+        if (restored) {
+          setAiProvider(draftProvider);
+        }
+      };
+
       if (typeof chrome !== 'undefined' && chrome.storage && chrome.storage.local) {
-        chrome.storage.local.get(['customer_config', 'basic_user_config'], (res) => {
+        chrome.storage.local.get(['customer_config', 'basic_user_config', 'geminiApiKey'], async (res) => {
           if (res.customer_config) {
             try {
               const config = res.customer_config as CustomerConfig;
@@ -301,11 +365,17 @@ export default function MicroOnboarding({ userId, onComplete, onSignOut, initial
             } catch (err) {
               console.error('Failed to parse chrome storage customer_config:', err);
             }
+          } else if (typeof res.geminiApiKey === 'string' && res.geminiApiKey.trim()) {
+            setGeminiApiKey(res.geminiApiKey.trim());
+            setIsKeyVerified(true);
           } else if (res.basic_user_config && res.basic_user_config.profile) {
             const profile = res.basic_user_config.profile;
             setFirstName(prev => prev || profile.firstName || '');
             setLastName(prev => prev || profile.lastName || '');
             setEmail(prev => prev || profile.email || '');
+            await applyDraftIfNeeded();
+          } else {
+            await applyDraftIfNeeded();
           }
         });
       } else {
@@ -331,11 +401,22 @@ export default function MicroOnboarding({ userId, onComplete, onSignOut, initial
           } catch (e) {
             console.error('Failed to parse local customer_config:', e);
           }
+        } else {
+          await applyDraftIfNeeded();
         }
       }
     };
     loadExisting();
   }, []);
+
+  // Auto-save API key locally while testing onboarding (chrome.storage — never committed to git)
+  useEffect(() => {
+    if (!geminiApiKey.trim() || devInjectActive) return;
+    const timer = window.setTimeout(() => {
+      void saveOnboardingDraftApiKey(aiProvider, geminiApiKey);
+    }, 600);
+    return () => window.clearTimeout(timer);
+  }, [geminiApiKey, aiProvider, devInjectActive]);
 
   const handleVerifyKey = async () => {
     if (!geminiApiKey.trim()) return;
@@ -344,6 +425,7 @@ export default function MicroOnboarding({ userId, onComplete, onSignOut, initial
       const result = await runVerifyKey(aiProvider, geminiApiKey.trim());
       setIsKeyVerified(result.valid);
       if (result.valid) {
+        await saveOnboardingDraftApiKey(aiProvider, geminiApiKey.trim());
         showToast('API key verified successfully.', 'success');
       } else {
         showToast(
@@ -423,23 +505,32 @@ export default function MicroOnboarding({ userId, onComplete, onSignOut, initial
     });
   };
 
-  const pickOutputDirectory = async () => {
-    try {
-      const handle = await (window as any).showDirectoryPicker();
-      if (!handle?.name) return;
-
-      const granted = await ensureDirectoryWriteAccess(handle);
-      if (!granted) {
-        showToast('Write access to the folder is required. Please allow access and try again.', 'warning');
-        return;
-      }
-
-      setDirHandle(handle);
-      setOutputDir(handle.name);
-      await saveOutputDirHandle(handle);
-    } catch (err) {
-      console.warn('Directory picker cancelled or not supported:', err);
+  const applyPickedOutputDirectory = async (handle: FileSystemDirectoryHandle, name: string) => {
+    const granted = await ensureDirectoryWriteAccess(handle);
+    if (!granted) {
+      showToast('Write access to the folder is required. Please allow access and try again.', 'warning');
+      return;
     }
+
+    setDirHandle(handle);
+    setOutputDir(name);
+    await saveOutputDirHandle(handle);
+    showToast(`Output folder set to "${name}"`, 'success');
+  };
+
+  const pickOutputDirectory = async () => {
+    const result = await requestDirectoryHandle();
+    if (!result.ok) {
+      const message = directoryPickerFailureMessage(result.reason);
+      if (message) showToast(message, 'warning');
+      if (result.reason === 'unsupported') {
+        showToast('Opening folder picker in a new tab…', 'info');
+        await openDirectoryPickerTab();
+      }
+      return;
+    }
+
+    await applyPickedOutputDirectory(result.handle, result.name);
   };
 
   const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -506,7 +597,7 @@ export default function MicroOnboarding({ userId, onComplete, onSignOut, initial
           setScanStatus,
           scanSignal,
           extraction.warnings,
-          { useAiParsing }
+          { useAiParsing, pageCount: extraction.pageCount }
         );
         throwIfScanCancelled();
         const parsed = scanResult.resume;
@@ -909,8 +1000,27 @@ export default function MicroOnboarding({ userId, onComplete, onSignOut, initial
           Get Started
         </h2>
 
-        {/* Right: Sign Out Icon */}
-        {onSignOut ? (
+        {/* Right: Report + Sign Out */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+          {onOpenReport ? (
+            <ReportProblemIconButton
+              onClick={onOpenReport}
+              className=""
+              style={{
+                background: 'none',
+                border: 'none',
+                color: 'var(--text-secondary)',
+                cursor: 'pointer',
+                padding: 8,
+                borderRadius: '50%',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                transition: 'all 0.2s',
+              }}
+            />
+          ) : null}
+          {onSignOut ? (
           <button
             type="button"
             disabled={isSigningOut}
@@ -950,9 +1060,10 @@ export default function MicroOnboarding({ userId, onComplete, onSignOut, initial
           >
             <LogOut size={18} />
           </button>
-        ) : (
-          <div style={{ width: 34 }} />
-        )}
+          ) : (
+            <div style={{ width: 34 }} />
+          )}
+        </div>
       </div>
 
       {/* Scrollable Form Content */}
@@ -1072,7 +1183,13 @@ export default function MicroOnboarding({ userId, onComplete, onSignOut, initial
               onChange={(e) => {
                 const prov = e.target.value as AiProvider;
                 setAiProvider(prov);
-                setIsKeyVerified(false);
+                void saveOnboardingDraftProvider(prov);
+                void applyDraftApiKey(prov, { markVerified: true }).then((restored) => {
+                  if (!restored) {
+                    setGeminiApiKey('');
+                    setIsKeyVerified(false);
+                  }
+                });
               }}
             >
               {(['gemini', 'openai', 'anthropic', 'grok'] as AiProvider[]).map((provider) => (

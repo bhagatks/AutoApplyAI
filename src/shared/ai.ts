@@ -8,6 +8,7 @@ import {
   formatGrokAccessDeniedError,
 } from './ai-errors';
 import { enqueueGeminiRequest, notifyGeminiRateLimited } from './ai-request-queue';
+import { traceAsync, traceLog } from './trace-logger';
 
 export type AiProvider = 'gemini' | 'openai' | 'anthropic' | 'grok';
 
@@ -410,7 +411,8 @@ async function runStreamingGeminiCall(
   promptText: string,
   onProgress?: (rawText: string) => void,
   model?: string,
-  systemInstruction: string = SYSTEM_INSTRUCTION
+  systemInstruction: string = SYSTEM_INSTRUCTION,
+  operation = 'gemini_stream'
 ): Promise<any> {
   const preferred = model || DEFAULT_PROVIDER_MODELS.gemini[0];
   const modelsToTry = [preferred, ...DEFAULT_PROVIDER_MODELS.gemini.filter((m) => m !== preferred)];
@@ -423,6 +425,7 @@ async function runStreamingGeminiCall(
       }
 
       try {
+        traceLog.debug('AI', operation, `gemini attempt ${attempt + 1}`, { model: candidateModel });
         return await runStreamingGeminiCallOnce(
           apiKey,
           promptText,
@@ -462,7 +465,7 @@ export async function runPass1Generate(
   layoutDecision?: { pages: number; reason: string }
 ): Promise<any> {
   const summarySentencesMax = rules.page_defense_layout?.macro_content_limits?.summary_sentences_max || 4;
-  const competenciesCount = rules.page_defense_layout?.macro_content_limits?.core_competencies_count || 6;
+  const competenciesCount = rules.page_defense_layout?.macro_content_limits?.core_competencies_count || 4;
   const pageLimit = rules.page_defense_layout?.absolute_page_limit || 1;
   const budget = getResumeLayoutBudget(pageLimit);
   const firstName = profile.firstName || "f_name";
@@ -485,7 +488,7 @@ ${jobDescription}
 Your tasks:
 1. Tailor the professional summary (max ${summarySentencesMax} sentences). Mirror the JD title in the first sentences. Plain paragraph only — no section headers.
 2. Tailor exactly ${competenciesCount} core competencies as LaTeX \\\\item lines: \\\\item \\\\textbf{Lead-in:} detail
-3. For each recent role (up to ${budget.maxRolesDetailed}), output tailoredExperience entries with experienceIndex, tailoredJobTitle (JD-aligned but truthful — never change company/dates), and ${budget.maxBulletsPerRole} metric-rich bullets each.
+3. For each recent role (up to ${budget.maxRolesDetailed}), output tailoredExperience entries with experienceIndex, tailoredJobTitle (JD-aligned but truthful — never change company/dates), and metric-heavy bullets (4/4/3 for template slots). Prioritize hard percentages, financial values, and latency/cost reduction figures — ~70% of bullets must include a quantified outcome grounded in the profile.
 4. Output tailoredSkills: merge profile skills with JD-required tools where evidence exists in the profile. Cap at ${budget.maxSkillsTotal} items.
 5. Write a tailored cover letter (recipient, location, subject, salutation, ${budget.coverLetterParagraphs}-${budget.coverLetterParagraphs + 1} paragraphs, Sincerely,\\\\n\\\\n${firstName} ${lastName}).
 6. Compute matchScore (0–100) for in-app job fit analysis only — never print on the resume.
@@ -500,7 +503,8 @@ Format the output strictly as a JSON object matching this schema.`;
     buildTailoringSystemInstruction(rules),
     promptText,
     onProgress,
-    model
+    model,
+    'pass1_generate'
   );
 }
 
@@ -528,7 +532,7 @@ export async function runPass2Optimize(
   layoutDecision?: { pages: number; reason: string }
 ): Promise<any> {
   const summarySentencesMax = rules.page_defense_layout?.macro_content_limits?.summary_sentences_max || 4;
-  const competenciesCount = rules.page_defense_layout?.macro_content_limits?.core_competencies_count || 6;
+  const competenciesCount = rules.page_defense_layout?.macro_content_limits?.core_competencies_count || 4;
   const pageLimit = rules.page_defense_layout?.absolute_page_limit || 1;
 
   const promptText = `You are a strict resume editor focused on job description alignment. Perform a second validation pass on the draft.
@@ -574,7 +578,7 @@ Your tasks:
 1. Audit against the job description and ${pageLimit}-page budget.
 2. Rewrite summary (max ${summarySentencesMax} sentences) with JD title in opening sentences.
 3. Ensure exactly ${competenciesCount} competency items.
-4. Refine tailoredExperience bullets (~70% with metrics); keep company/dates unchanged; only adjust tailoredJobTitle when credible.
+4. Refine tailoredExperience bullets — at least ~70% must carry hard metrics (percentages, dollar impact, latency/cost reduction); keep company/dates unchanged; only adjust tailoredJobTitle when credible.
 5. Refine tailoredSkills — omit JD-only skills with no profile evidence.
 6. Optimize cover letter structure.
 7. Re-evaluate matchScore (in-app only).
@@ -589,7 +593,8 @@ Format the output strictly as a JSON object matching this schema.`;
     buildTailoringSystemInstruction(rules),
     promptText,
     onProgress,
-    model
+    model,
+    'pass2_optimize'
   );
 }
 
@@ -600,10 +605,16 @@ async function runProviderCall(
   systemInstruction: string,
   promptText: string,
   onProgress?: (rawText: string) => void,
-  modelName?: string
+  modelName?: string,
+  operation = 'provider_call'
 ): Promise<any> {
+  const model = modelName || DEFAULT_PROVIDER_MODELS[provider][0];
+  return traceAsync(
+    'AI',
+    operation,
+    async () => {
   if (provider === 'gemini') {
-    return runStreamingGeminiCall(apiKey, promptText, onProgress, modelName, systemInstruction);
+    return runStreamingGeminiCall(apiKey, promptText, onProgress, modelName, systemInstruction, operation);
   }
 
   if (provider === 'openai') {
@@ -682,6 +693,9 @@ async function runProviderCall(
   }
 
   throw new Error(`Unsupported AI provider: ${provider}`);
+    },
+    { provider, model, promptChars: promptText.length, ai: true }
+  );
 }
 
 // Verify API Key functionality
@@ -917,7 +931,35 @@ export async function verifyProviderApiKey(
   return { valid: false, error: `Unsupported provider: ${provider}` };
 }
 
-import { PARSED_RESUME_JSON_SCHEMA, PARSED_RESUME_GEMINI_SCHEMA, ParsedResume, ResumeParseQuality, emptyParsedResume, formatExperienceForPrompt, formatEducationForPrompt, normalizeEducationEntry, educationFromLegacyHighestDegree, deriveHighestDegree, assessParsedResumeQuality, mergeParsedResume } from './resume-types';
+import {
+  PARSED_RESUME_JSON_SCHEMA,
+  PARSED_RESUME_GEMINI_SCHEMA,
+  RESUME_PROFILE_GEMINI_SCHEMA,
+  RESUME_EXPERIENCE_GEMINI_SCHEMA,
+  ParsedResume,
+  WorkExperience,
+  ResumeParseQuality,
+  emptyParsedResume,
+  formatExperienceForPrompt,
+  formatEducationForPrompt,
+  normalizeEducationEntry,
+  educationFromLegacyHighestDegree,
+  deriveHighestDegree,
+  assessParsedResumeQuality,
+  mergeParsedResume,
+  assembleSplitParseParts,
+  safeParseResumePayload,
+} from './resume-types';
+import {
+  shouldUseSplitResumeParse,
+  tokenizeResumeSections,
+  buildLocalSectionDrafts,
+  buildProfileCategoryPromptText,
+  buildExperienceChunkPromptText,
+  splitExperienceIntoChunks,
+  getExperienceSectionLines,
+  mergeExperienceChunks,
+} from './resume-parse-split';
 import {
   buildLayoutPromptSection,
   buildResumeContextPromptSection,
@@ -930,6 +972,8 @@ export type { ResumeParseQuality } from './resume-types';
 export interface ResumeParseOptions {
   /** When true (default), use AI to structure the resume. When false, only basic contact regex + manual entry. */
   useAiParsing?: boolean;
+  /** PDF page count from extraction — triggers split parse when > 1 page. */
+  pageCount?: number;
 }
 
 export interface ResumeScanResult {
@@ -982,10 +1026,15 @@ function buildCandidateContextBlock(profile: BaseProfile, parsedResume?: ParsedR
 }
 
 function normalizeParsedResume(raw: Partial<ParsedResume>, sourceFileName: string): ParsedResume {
+  const zodResult = safeParseResumePayload(raw);
+  const parsed: Partial<ParsedResume> = zodResult.success
+    ? (zodResult.data as Partial<ParsedResume>)
+    : raw;
+
   const base = emptyParsedResume();
   const experience =
-    raw.experience?.length && Array.isArray(raw.experience)
-      ? raw.experience.map((job) => {
+    parsed.experience?.length && Array.isArray(parsed.experience)
+      ? parsed.experience.map((job) => {
           const loose = job as Partial<ParsedResume['experience'][number]> & { title?: string };
           return {
             jobTitle: loose.jobTitle || loose.title || '',
@@ -999,33 +1048,33 @@ function normalizeParsedResume(raw: Partial<ParsedResume>, sourceFileName: strin
       : base.experience;
 
   const education =
-    raw.education?.length && Array.isArray(raw.education)
-      ? raw.education.map((entry) => normalizeEducationEntry(entry))
-      : raw.highestDegree?.trim()
-        ? educationFromLegacyHighestDegree(raw.highestDegree)
+    parsed.education?.length && Array.isArray(parsed.education)
+      ? parsed.education.map((entry) => normalizeEducationEntry(entry))
+      : parsed.highestDegree?.trim()
+        ? educationFromLegacyHighestDegree(parsed.highestDegree)
         : base.education;
 
   return {
     ...base,
-    ...raw,
-    firstName: raw.firstName || '',
-    lastName: raw.lastName || '',
-    email: raw.email || '',
-    phone: raw.phone || '',
-    city: raw.city || '',
-    state: raw.state || '',
-    country: raw.country || 'United States',
-    role: raw.role || '',
-    summary: raw.summary || '',
-    competencies: Array.isArray(raw.competencies) ? raw.competencies.filter(Boolean) : [],
-    skills: Array.isArray(raw.skills) ? raw.skills.filter(Boolean) : [],
+    ...parsed,
+    firstName: parsed.firstName || '',
+    lastName: parsed.lastName || '',
+    email: parsed.email || '',
+    phone: parsed.phone || '',
+    city: parsed.city || '',
+    state: parsed.state || '',
+    country: parsed.country || 'United States',
+    role: parsed.role || '',
+    summary: parsed.summary || '',
+    competencies: Array.isArray(parsed.competencies) ? parsed.competencies.filter(Boolean) : [],
+    skills: Array.isArray(parsed.skills) ? parsed.skills.filter(Boolean) : [],
     experience,
     education,
-    currentCompany: raw.currentCompany || experience[0]?.company || '',
+    currentCompany: parsed.currentCompany || experience[0]?.company || '',
     currentlyWorking:
-      typeof raw.currentlyWorking === 'boolean'
-        ? raw.currentlyWorking
-        : (raw.experience?.[0]?.endDate || '').toLowerCase() === 'present',
+      typeof parsed.currentlyWorking === 'boolean'
+        ? parsed.currentlyWorking
+        : (parsed.experience?.[0]?.endDate || '').toLowerCase() === 'present',
     highestDegree: deriveHighestDegree(education),
     sourceFileName,
     scannedAt: new Date().toISOString(),
@@ -1197,9 +1246,11 @@ async function geminiGenerateJson(
   systemPrompt: string,
   promptText: string,
   signal?: AbortSignal,
-  responseSchema?: unknown
+  responseSchema?: unknown,
+  operation = 'gemini_generate_json'
 ): Promise<string> {
-  return enqueueGeminiRequest(async (queuedSignal) => {
+  return traceAsync('AI', operation, () =>
+    enqueueGeminiRequest(async (queuedSignal) => {
     throwIfScanAborted(signal ?? queuedSignal);
     const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${geminiKeyParam(apiKey)}`;
     const res = await fetchWithTimeout(url, {
@@ -1212,6 +1263,7 @@ async function geminiGenerateJson(
         generationConfig: {
           responseMimeType: 'application/json',
           maxOutputTokens: 16384,
+          ...(model.includes('2.5') ? { thinkingConfig: { thinkingBudget: 0 } } : {}),
           ...(responseSchema ? { responseSchema } : {}),
         },
       }),
@@ -1227,17 +1279,70 @@ async function geminiGenerateJson(
       throw new SyntaxError('Gemini response truncated (MAX_TOKENS).');
     }
     return candidate?.content?.parts?.[0]?.text || '{}';
-  }, signal);
+  }, signal),
+  { provider: 'gemini', model, promptChars: promptText.length, ai: true }
+  );
 }
 
 const BASIC_CONTACT_EMAIL_RE = /\b[\w.+-]+@[\w.-]+\.[A-Za-z]{2,}\b/;
 const BASIC_CONTACT_PHONE_RE =
   /(?:\+?\d{1,3}[-.\s]?)?(?:\(\d{3}\)|\d{3})[-.\s]?\d{3}[-.\s]?\d{4}\b|\+\d{10,15}\b/;
 const BASIC_CONTACT_LINKEDIN_RE = /(?:https?:\/\/)?(?:www\.)?linkedin\.com\/in\/[\w-]+/i;
+const BASIC_CONTACT_GITHUB_RE = /(?:https?:\/\/)?(?:www\.)?github\.com\/[\w-]+/i;
+const BASIC_CONTACT_WEBSITE_RE =
+  /(?:https?:\/\/)?(?:www\.)?(?!linkedin\.com|github\.com)[\w-]+(?:\.[\w.-]+)+(?:\/[\w./?%&=-]*)?/i;
+const BASIC_CONTACT_CITY_STATE_RE = /\b([A-Za-z][A-Za-z .'-]{1,40}),\s*([A-Z]{2})\b/;
+const BASIC_CONTACT_SECTION_RE =
+  /^(experience|work experience|employment|education|skills|technical skills|summary|profile|projects|certifications|licenses|references|objective|competencies)\b/i;
 
-function extractBasicContactFromText(text: string): Partial<ParsedResume> {
+function isResumeContactLine(line: string): boolean {
+  return (
+    BASIC_CONTACT_EMAIL_RE.test(line) ||
+    BASIC_CONTACT_PHONE_RE.test(line) ||
+    /linkedin|github|https?:\/\//i.test(line) ||
+    BASIC_CONTACT_CITY_STATE_RE.test(line)
+  );
+}
+
+function splitNameFromLine(line: string): { firstName: string; lastName: string } | null {
+  const cleaned = line
+    .replace(/[|•]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+  if (!cleaned || cleaned.length < 3 || cleaned.length > 70) return null;
+  if (/\d/.test(cleaned)) return null;
+  if (/[@#]/.test(cleaned)) return null;
+  if (/linkedin|github|http|www\./i.test(cleaned)) return null;
+  if (BASIC_CONTACT_SECTION_RE.test(cleaned)) return null;
+
+  const words = cleaned.split(' ').filter(Boolean);
+  if (words.length < 2 || words.length > 5) return null;
+  if (!words.every((word) => /^[A-Za-z][A-Za-z'.-]*$/.test(word))) return null;
+
+  return {
+    firstName: words[0],
+    lastName: words.slice(1).join(' '),
+  };
+}
+
+function looksLikeRoleLine(line: string): boolean {
+  const cleaned = line.trim();
+  if (!cleaned || cleaned.length > 90) return false;
+  if (isResumeContactLine(cleaned)) return false;
+  if (BASIC_CONTACT_SECTION_RE.test(cleaned)) return false;
+  if (/^\W+$/.test(cleaned)) return false;
+  return true;
+}
+
+/** Regex rescue for core identity fields when AI is unavailable. */
+export function extractBasicContactFromText(text: string): Partial<ParsedResume> {
   const result: Partial<ParsedResume> = {};
-  const header = text.split('\n').slice(0, 12).join('\n');
+  const lines = text
+    .split(/\n+/)
+    .map((line) => line.trim())
+    .filter(Boolean);
+  const headerLines = lines.slice(0, 20);
+  const header = headerLines.join('\n');
 
   const email = header.match(BASIC_CONTACT_EMAIL_RE)?.[0] || text.match(BASIC_CONTACT_EMAIL_RE)?.[0];
   if (email) result.email = email.toLowerCase();
@@ -1250,11 +1355,68 @@ function extractBasicContactFromText(text: string): Partial<ParsedResume> {
     result.linkedin = /^https?:\/\//i.test(linkedin) ? linkedin : `https://${linkedin}`;
   }
 
+  const github = header.match(BASIC_CONTACT_GITHUB_RE)?.[0] || text.match(BASIC_CONTACT_GITHUB_RE)?.[0];
+  if (github) {
+    result.github = /^https?:\/\//i.test(github) ? github : `https://${github}`;
+  }
+
+  const website = header.match(BASIC_CONTACT_WEBSITE_RE)?.[0] || text.match(BASIC_CONTACT_WEBSITE_RE)?.[0];
+  if (website) {
+    const normalized = /^https?:\/\//i.test(website) ? website : `https://${website}`;
+    result.website = normalized;
+    if (!result.portfolio) result.portfolio = normalized;
+  }
+
+  const cityState = header.match(BASIC_CONTACT_CITY_STATE_RE);
+  if (cityState) {
+    result.city = cityState[1].trim();
+    result.state = cityState[2].trim();
+    result.country = 'United States';
+  }
+
+  let nameLineIndex = -1;
+  for (let i = 0; i < headerLines.length; i++) {
+    const line = headerLines[i];
+    if (isResumeContactLine(line)) continue;
+    const name = splitNameFromLine(line);
+    if (name) {
+      result.firstName = name.firstName;
+      result.lastName = name.lastName;
+      nameLineIndex = i;
+      break;
+    }
+  }
+
+  if (nameLineIndex >= 0) {
+    for (let i = nameLineIndex + 1; i < Math.min(nameLineIndex + 4, headerLines.length); i++) {
+      const line = headerLines[i];
+      if (looksLikeRoleLine(line)) {
+        result.role = line;
+        break;
+      }
+    }
+  }
+
   return result;
 }
 
-function parseResumeWithoutAi(extractedText: string, sourceFileName: string): ParsedResume {
-  return normalizeParsedResume(extractBasicContactFromText(extractedText), sourceFileName);
+/** Deterministic middle-tier parser — contact regex + local section tokenizer. No LLM. */
+export function parseResumeWithoutAi(extractedText: string, sourceFileName: string): ParsedResume {
+  traceLog.info('LOCAL', 'parse_resume', 'deterministic parse (no AI)', {
+    sourceFileName,
+    textChars: extractedText.length,
+    ai: false,
+  });
+  const contact = extractBasicContactFromText(extractedText);
+  const buckets = tokenizeResumeSections(extractedText);
+  const structured = buildLocalSectionDrafts(buckets);
+  const resume = normalizeParsedResume({ ...contact, ...structured }, sourceFileName);
+  traceLog.info('LOCAL', 'parse_resume', 'deterministic parse complete', {
+    experienceCount: resume.experience?.length ?? 0,
+    skillsCount: resume.skills?.length ?? 0,
+    ai: false,
+  });
+  return resume;
 }
 
 const RESUME_PARSE_SYSTEM_PROMPT = `You are an expert resume parser for ATS systems. Extract ALL available structured data from the resume text. Output ONLY a raw JSON object matching this schema exactly. Use empty strings for missing scalar fields and empty arrays when none found. For experience, include every job listed with bullet achievements. For education, include every degree, professional certification, license, bootcamp, and training credential as separate entries with the appropriate credentialType. For skills, extract every language, framework, database, cloud platform, tool, and methodology from the Skills/Technical Skills section as separate strings in the skills array (not competencies).
@@ -1262,6 +1424,98 @@ const RESUME_PARSE_SYSTEM_PROMPT = `You are an expert resume parser for ATS syst
 CRITICAL: You MUST include "experience" and "skills" arrays even if sparse. Escape quotes inside strings. No markdown fences.
 Schema:
 ${PARSED_RESUME_JSON_SCHEMA}`;
+
+const RESUME_PROFILE_PARSE_SYSTEM_PROMPT = `You extract resume profile facts only: contact fields, education/credentials, and technical skills.
+
+Do NOT extract work experience, professional summary, or competencies.
+Output ONLY valid JSON. List each technical skill as a separate string. Do not invent credentials.`;
+
+const RESUME_EXPERIENCE_PARSE_SYSTEM_PROMPT = `You extract work experience only from resume text.
+
+For each role return jobTitle, company, startDate, endDate, optional location, and bullets[] with FULL achievement text preserved (do not shorten).
+Company names and dates must match the source. Do not invent employers. Do not extract education or skills.`;
+
+function isGeminiMaxTokensError(err: unknown): boolean {
+  const msg = err instanceof Error ? err.message : String(err);
+  return msg.includes('MAX_TOKENS') || msg.toLowerCase().includes('truncated');
+}
+
+function buildSplitParseLocalSeed(extractedText: string) {
+  const buckets = tokenizeResumeSections(extractedText);
+  return {
+    buckets,
+    localSeed: {
+      ...extractBasicContactFromText(extractedText),
+      ...buildLocalSectionDrafts(buckets),
+    },
+  };
+}
+
+async function parseResumeWithGeminiSplit(
+  apiKey: string,
+  model: string | undefined,
+  sourceFileName: string,
+  extractedText: string,
+  onStatus?: (message: string) => void,
+  signal?: AbortSignal
+): Promise<ParsedResume> {
+  const preferred = model || DEFAULT_PROVIDER_MODELS.gemini[0];
+  const { buckets, localSeed } = buildSplitParseLocalSeed(extractedText);
+
+  onStatus?.('Extracting contact, education, and skills...');
+  traceLog.info('AI', 'parse_resume_profile', 'split parse category 1', {
+    textChars: extractedText.length,
+    ai: true,
+  });
+
+  const profileJson = await geminiGenerateJson(
+    apiKey,
+    preferred,
+    RESUME_PROFILE_PARSE_SYSTEM_PROMPT,
+    buildProfileCategoryPromptText(extractedText, buckets),
+    signal,
+    RESUME_PROFILE_GEMINI_SCHEMA,
+    'gemini_parse_profile'
+  );
+  const profilePatch = parseAiJsonObject(profileJson) as Partial<ParsedResume>;
+
+  onStatus?.('Extracting work history...');
+  const experienceLines = getExperienceSectionLines(buckets, extractedText);
+  const chunks = splitExperienceIntoChunks(experienceLines);
+  const experienceParts: WorkExperience[][] = [];
+
+  for (let i = 0; i < chunks.length; i++) {
+    if (chunks.length > 1) {
+      onStatus?.(`Extracting work history (${i + 1}/${chunks.length})...`);
+    }
+    traceLog.info('AI', 'parse_resume_experience', `split parse category 2 chunk ${i + 1}/${chunks.length}`, {
+      chunkChars: chunks[i].length,
+      ai: true,
+    });
+
+    const expJson = await geminiGenerateJson(
+      apiKey,
+      preferred,
+      RESUME_EXPERIENCE_PARSE_SYSTEM_PROMPT,
+      buildExperienceChunkPromptText(chunks[i], i, chunks.length),
+      signal,
+      RESUME_EXPERIENCE_GEMINI_SCHEMA,
+      'gemini_parse_experience'
+    );
+    const expPatch = parseAiJsonObject(expJson) as { experience?: WorkExperience[] };
+    if (expPatch.experience?.length) {
+      experienceParts.push(expPatch.experience);
+    }
+  }
+
+  let experience = mergeExperienceChunks(experienceParts);
+  if (!experience.some((job) => job.company?.trim() || job.jobTitle?.trim())) {
+    experience = localSeed.experience || [];
+  }
+
+  const assembled = assembleSplitParseParts(profilePatch, experience, localSeed);
+  return normalizeParsedResume(assembled, sourceFileName);
+}
 
 const RESUME_SECTIONS_SYSTEM_PROMPT = `You are an expert resume parser. Extract work experience, education, skills, competencies, role, and summary from the resume text.
 
@@ -1326,9 +1580,35 @@ async function parseResumeWithGemini(
   systemPrompt: string,
   promptText: string,
   extractedText: string,
+  pageCount = 1,
   onStatus?: (message: string) => void,
   signal?: AbortSignal
 ): Promise<ParsedResume> {
+  if (shouldUseSplitResumeParse(extractedText.length, pageCount)) {
+    onStatus?.('Long resume — parsing in sections...');
+    traceLog.info('AI', 'parse_resume', 'using split category parse', {
+      pageCount,
+      textChars: extractedText.length,
+      ai: true,
+    });
+    try {
+      return await parseResumeWithGeminiSplit(
+        apiKey,
+        model,
+        sourceFileName,
+        extractedText,
+        onStatus,
+        signal
+      );
+    } catch (splitErr) {
+      if (isScanCancelledError(splitErr)) throw splitErr;
+      console.warn('Split resume parse failed:', splitErr);
+      traceLog.warn('AI', 'parse_resume', 'split parse failed — trying monolith', {
+        error: splitErr instanceof Error ? splitErr.message : String(splitErr),
+      });
+    }
+  }
+
   const preferred = model || DEFAULT_PROVIDER_MODELS.gemini[0];
   const modelsToTry = [preferred, ...DEFAULT_PROVIDER_MODELS.gemini.filter((m) => m !== preferred)];
   let lastError: Error | null = null;
@@ -1387,6 +1667,23 @@ async function parseResumeWithGemini(
         const status = err?.status ?? 0;
         const body = err?.body ?? lastError.message;
 
+        if (isGeminiMaxTokensError(lastError)) {
+          onStatus?.('Resume is long — parsing in sections...');
+          try {
+            return await parseResumeWithGeminiSplit(
+              apiKey,
+              candidateModel,
+              sourceFileName,
+              extractedText,
+              onStatus,
+              signal
+            );
+          } catch (splitErr) {
+            if (isScanCancelledError(splitErr)) throw splitErr;
+            lastError = splitErr instanceof Error ? splitErr : new Error(String(splitErr));
+          }
+        }
+
         if (status === 429) notifyGeminiRateLimited(8_000 * (attempt + 1));
         if (shouldTryNextGeminiModel(status, body)) break;
         if (!isRetryableGeminiError(status, body)) throw lastError;
@@ -1419,7 +1716,8 @@ ${extractedText.slice(0, 28000)}
     RESUME_SECTIONS_SYSTEM_PROMPT,
     promptText,
     undefined,
-    model
+    model,
+    'resume_enrich'
   );
   return result as Partial<ParsedResume>;
 }
@@ -1441,7 +1739,7 @@ async function finalizeResumeScan(
 
   if (!useAiParsing) {
     warnings.push(
-      'AI parsing is off — only basic contact fields were detected. Fill in experience, skills, and education manually, or enable "Use AI to parse resume".'
+      'AI parsing is off — contact fields and section drafts were extracted locally. Review and refine experience, education, and skills, or enable "Use AI to parse resume".'
     );
     for (const warning of assessment.warnings) {
       if (!warnings.includes(warning)) warnings.push(warning);
@@ -1468,67 +1766,33 @@ async function finalizeResumeScan(
   return { resume: merged, warnings, quality: assessment.quality };
 }
 
-// Parse resume into full ATS-ready structured profile
-export async function parseResumeWithAI(
+async function parseResumeWithProvider(
   provider: AiProvider,
   apiKey: string,
+  model: string | undefined,
+  sourceFileName: string,
   extractedText: string,
-  model?: string,
-  sourceFileName = 'resume.pdf',
+  pageCount = 1,
   onStatus?: (message: string) => void,
-  signal?: AbortSignal,
-  extractionWarnings: string[] = [],
-  options: ResumeParseOptions = {}
-): Promise<ResumeScanResult> {
-  const useAiParsing = options.useAiParsing ?? true;
-  throwIfScanAborted(signal);
-
-  if (!useAiParsing) {
-    onStatus?.('Detecting contact fields from resume text...');
-    const resume = parseResumeWithoutAi(extractedText, sourceFileName);
-    return finalizeResumeScan(
-      resume,
-      extractedText,
-      extractionWarnings,
-      provider,
-      apiKey,
-      model,
-      onStatus,
-      signal,
-      false
-    );
-  }
-
+  signal?: AbortSignal
+): Promise<ParsedResume> {
   const systemPrompt = RESUME_PARSE_SYSTEM_PROMPT;
-
   const promptText = `Parse this resume and extract structured profile data:
 """
 ${extractedText.slice(0, 28000)}
 """`;
 
-  onStatus?.('Structuring profile with AI...');
-
   if (provider === 'gemini') {
-    const resume = await parseResumeWithGemini(
+    return parseResumeWithGemini(
       apiKey,
       model,
       sourceFileName,
       systemPrompt,
       promptText,
       extractedText,
+      pageCount,
       onStatus,
       signal
-    );
-    return finalizeResumeScan(
-      resume,
-      extractedText,
-      extractionWarnings,
-      provider,
-      apiKey,
-      model,
-      onStatus,
-      signal,
-      true
     );
   }
 
@@ -1556,18 +1820,7 @@ ${extractedText.slice(0, 28000)}
     }
     const json = await res.json();
     const text = json.choices?.[0]?.message?.content || '{}';
-    const resume = parseResumeJson(text, sourceFileName);
-    return finalizeResumeScan(
-      resume,
-      extractedText,
-      extractionWarnings,
-      provider,
-      apiKey,
-      model,
-      onStatus,
-      signal,
-      true
-    );
+    return parseResumeJson(text, sourceFileName);
   }
 
   if (provider === 'grok') {
@@ -1594,18 +1847,7 @@ ${extractedText.slice(0, 28000)}
     }
     const json = await res.json();
     const text = json.choices?.[0]?.message?.content || '{}';
-    const resume = parseResumeJson(text, sourceFileName);
-    return finalizeResumeScan(
-      resume,
-      extractedText,
-      extractionWarnings,
-      provider,
-      apiKey,
-      model,
-      onStatus,
-      signal,
-      true
-    );
+    return parseResumeJson(text, sourceFileName);
   }
 
   if (provider === 'anthropic') {
@@ -1639,7 +1881,67 @@ ${extractedText.slice(0, 28000)}
     }
     const json = await res.json();
     const text = json.content?.[0]?.text || '{}';
-    const resume = parseResumeJson(text, sourceFileName);
+    return parseResumeJson(text, sourceFileName);
+  }
+
+  throw new Error(`Unsupported AI provider: ${provider}`);
+}
+
+// Parse resume into full ATS-ready structured profile
+export async function parseResumeWithAI(
+  provider: AiProvider,
+  apiKey: string,
+  extractedText: string,
+  model?: string,
+  sourceFileName = 'resume.pdf',
+  onStatus?: (message: string) => void,
+  signal?: AbortSignal,
+  extractionWarnings: string[] = [],
+  options: ResumeParseOptions = {}
+): Promise<ResumeScanResult> {
+  const useAiParsing = options.useAiParsing ?? true;
+  const pageCount = options.pageCount ?? 1;
+  throwIfScanAborted(signal);
+
+  traceLog.info('RESUME', 'parse_resume_with_ai', 'resume scan started', {
+    provider,
+    useAiParsing,
+    sourceFileName,
+    textChars: extractedText.length,
+    pageCount,
+    splitParse: shouldUseSplitResumeParse(extractedText.length, pageCount),
+  });
+
+  if (!useAiParsing) {
+    onStatus?.('Detecting contact fields from resume text...');
+    const resume = parseResumeWithoutAi(extractedText, sourceFileName);
+    return finalizeResumeScan(
+      resume,
+      extractedText,
+      extractionWarnings,
+      provider,
+      apiKey,
+      model,
+      onStatus,
+      signal,
+      false
+    );
+  }
+
+  onStatus?.('Structuring profile with AI...');
+  traceLog.info('AI', 'parse_resume', 'AI parsing enabled', { provider, model, ai: true });
+
+  try {
+    const resume = await parseResumeWithProvider(
+      provider,
+      apiKey,
+      model,
+      sourceFileName,
+      extractedText,
+      pageCount,
+      onStatus,
+      signal
+    );
     return finalizeResumeScan(
       resume,
       extractedText,
@@ -1651,9 +1953,29 @@ ${extractedText.slice(0, 28000)}
       signal,
       true
     );
+  } catch (err) {
+    if (isScanCancelledError(err)) throw err;
+    traceLog.warn('AI', 'parse_resume', 'AI parsing failed — falling back to local parse', {
+      error: err instanceof Error ? err.message : String(err),
+    });
+    console.warn('AI resume parsing failed — falling back to contact extraction:', err);
+    const fallbackWarnings = [
+      ...extractionWarnings,
+      'AI parsing failed — only basic contact fields were detected. Review and complete your profile manually.',
+    ];
+    const resume = parseResumeWithoutAi(extractedText, sourceFileName);
+    return finalizeResumeScan(
+      resume,
+      extractedText,
+      fallbackWarnings,
+      provider,
+      apiKey,
+      model,
+      onStatus,
+      signal,
+      false
+    );
   }
-
-  throw new Error(`Unsupported AI provider: ${provider}`);
 }
 
 // Smart list models helper — API first, then cache, then defaults
@@ -1725,7 +2047,15 @@ Return JSON: { "answers": { "<question_id>": "<answer text>", ... } }`;
   const systemInstruction =
     'You write truthful job application answers. Output only valid JSON. No markdown.';
 
-  const result = await runProviderCall(provider, apiKey, systemInstruction, promptText, undefined, model);
+  const result = await runProviderCall(
+    provider,
+    apiKey,
+    systemInstruction,
+    promptText,
+    undefined,
+    model,
+    'application_answers'
+  );
   const answers = result?.answers && typeof result.answers === 'object' ? result.answers : {};
   const normalized: Record<string, string> = {};
   for (const q of questions) {

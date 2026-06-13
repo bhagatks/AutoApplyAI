@@ -4,8 +4,8 @@ This folder holds **local-only** onboarding test helpers.
 
 ## Active now (remove later)
 
-- **`.env.local`** (repo root, gitignored) — your test API keys
-- **`VITE_ONBOARDING_DEV_INJECT=true`** — turns on auto-fill in onboarding
+- **`.env.local`** (repo root, gitignored) — optional build-time test API keys (`VITE_ONBOARDING_DEV_INJECT`)
+- **`chrome.storage.local`** — onboarding draft API keys (`onboarding_draft_api_keys`) saved as you type; never in git
 
 ## When you finish testing onboarding
 

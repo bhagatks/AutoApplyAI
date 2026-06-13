@@ -33,6 +33,7 @@ export default defineConfig({
         landing: resolve(__dirname, 'index.html'),
         dashboard: resolve(__dirname, 'dashboard.html'),
         sidepanel: resolve(__dirname, 'sidepanel.html'),
+        'directory-picker': resolve(__dirname, 'directory-picker.html'),
         background: resolve(__dirname, 'src/background/index.ts'),
         content: resolve(__dirname, 'src/content/index.ts'),
       },

@@ -2,9 +2,11 @@ import ReactDOM from 'react-dom/client';
 import App from './App';
 import './style.css';
 import { initSentry } from '../shared/sentry';
+import { setTraceSurface } from '../shared/trace-logger';
 import { ErrorBoundary } from '@sentry/react';
 
 initSentry('sidepanel');
+setTraceSurface('sidepanel');
 
 document.documentElement.classList.add('sidepanel-root');
 document.body.classList.add('sidepanel-root');

@@ -1,6 +1,6 @@
 # AutoApplyAI — architecture (v2)
 
-**Last updated:** 2026-06-12
+**Last updated:** 2026-06-13
 
 ## What it is (30 seconds)
 
@@ -26,6 +26,10 @@ Build: Vite + TypeScript + React + Tailwind. Output goes to `dist/` (load unpack
 - **Local** — `chrome.storage.local` (extension), `localStorage` (dashboard); pipeline queue state in `pipeline-storage.ts`.
 - **Onboarding gate** — Login → micro-onboarding → workspace. See [FLOW.md](../FLOW.md).
 
+## Product DNA
+
+**The branded resume is the product.** AutoApplyAI exists to deliver the best possible tailored resume in a fixed, high-density master format (`master-resume-template.tex`). Every surface — preview, PDF, DOCX, `.tex`, assist-apply upload — must render from the same placeholder pipeline (`resolveMasterResumePlaceholders` → `MasterResumePreviewModel`). No alternate layouts.
+
 ## Tailoring pipeline (summary)
 
 1. User opens a job listing; content script or side panel collects JD text (title, company, description).
@@ -46,12 +50,13 @@ src/
 ├── apply/               # Job-application adapters (types)
 ├── config/              # App URLs, env-aware config
 └── shared/
-    ├── ai.ts            # Gemini / multi-provider AI passes
+    ├── ai.ts            # Gemini / multi-provider AI passes + resume parsing
     ├── tailor-job.ts    # End-to-end tailor orchestration
     ├── db.ts            # Firestore + auth helpers
     ├── resume-engine/   # Resolve, validate, format, export
-    ├── resume-parse/    # PDF → structured ParsedResume
-    ├── resume-types.ts  # Parsed resume + base profile types
+    ├── resume-extract.ts # PDF/DOCX/TXT geometric text extraction
+    ├── resume-types.ts  # Parsed resume contracts, Zod validation, quality analysis
+    ├── resume-dates.ts  # Date string normalization
     ├── pipeline-storage.ts
     └── types.ts         # Job, CustomerConfig, ResumeRules, etc.
 ```
@@ -79,3 +84,7 @@ npm run test:flow
 |------|--------|
 | 2026-06-12 | Initial v2 architecture doc (replaces stale README Python narrative) |
 | 2026-06-12 | `dist/` gitignored; production build strips dev API keys from bundles |
+| 2026-06-12 | Added `resume-parser/` — Zod-schemas, ingest-once pipeline; legacy `parseResumeWithAI` unchanged |
+| 2026-06-12 | Cross-context trace logger (`trace-logger.ts`) + sidepanel Trace Logs panel for AI/Firestore/pipeline debugging |
+| 2026-06-13 | Unified PDF/DOCX/preview/`.tex` on `master-resume-template.tex` — single `MasterResumePreviewModel` export pipeline |
+| 2026-06-13 | Support reports queue to Firestore `mail` for Trigger Email / backend delivery; requires `firebase/firestore-send-email` or custom worker |

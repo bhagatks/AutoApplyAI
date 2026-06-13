@@ -1,3 +1,4 @@
+import { z } from 'zod';
 import { sanitizeResumeDate } from './resume-dates';
 
 export interface WorkExperience {
@@ -306,6 +307,132 @@ export const PARSED_RESUME_SECTIONS_GEMINI_SCHEMA = {
   },
   required: ['experience', 'skills'],
 };
+
+/** Category 1 — contact, education, credentials, skill inventory (compact parse pass). */
+export const RESUME_PROFILE_GEMINI_SCHEMA = {
+  type: 'OBJECT',
+  properties: {
+    firstName: { type: 'STRING' },
+    lastName: { type: 'STRING' },
+    email: { type: 'STRING' },
+    phone: { type: 'STRING' },
+    city: { type: 'STRING' },
+    state: { type: 'STRING' },
+    country: { type: 'STRING' },
+    postalCode: { type: 'STRING' },
+    role: { type: 'STRING' },
+    linkedin: { type: 'STRING' },
+    github: { type: 'STRING' },
+    portfolio: { type: 'STRING' },
+    website: { type: 'STRING' },
+    skills: { type: 'ARRAY', items: { type: 'STRING' } },
+    education: {
+      type: 'ARRAY',
+      items: {
+        type: 'OBJECT',
+        properties: {
+          credentialType: { type: 'STRING' },
+          degree: { type: 'STRING' },
+          fieldOfStudy: { type: 'STRING' },
+          school: { type: 'STRING' },
+          location: { type: 'STRING' },
+          startDate: { type: 'STRING' },
+          endDate: { type: 'STRING' },
+          honors: { type: 'STRING' },
+        },
+      },
+    },
+  },
+  required: ['firstName', 'lastName', 'email'],
+};
+
+/** Category 2 — work history only (separate pass for multi-page resumes). */
+export const RESUME_EXPERIENCE_GEMINI_SCHEMA = {
+  type: 'OBJECT',
+  properties: {
+    experience: {
+      type: 'ARRAY',
+      items: {
+        type: 'OBJECT',
+        properties: {
+          jobTitle: { type: 'STRING' },
+          company: { type: 'STRING' },
+          location: { type: 'STRING' },
+          startDate: { type: 'STRING' },
+          endDate: { type: 'STRING' },
+          bullets: { type: 'ARRAY', items: { type: 'STRING' } },
+        },
+      },
+    },
+  },
+  required: ['experience'],
+};
+
+export function dedupeWorkExperience(entries: WorkExperience[]): WorkExperience[] {
+  const seen = new Set<string>();
+  const out: WorkExperience[] = [];
+  for (const job of entries) {
+    const key = [
+      job.company.trim().toLowerCase(),
+      job.jobTitle.trim().toLowerCase(),
+      job.startDate.trim(),
+      job.endDate.trim(),
+    ].join('|');
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(job);
+  }
+  return out;
+}
+
+export function assembleSplitParseParts(
+  profilePatch: Partial<ParsedResume>,
+  experience: WorkExperience[],
+  localSeed: Partial<ParsedResume> = {}
+): Partial<ParsedResume> {
+  const pick = (patchVal: string | undefined, seedVal: string | undefined, fallback = '') =>
+    patchVal?.trim() || seedVal?.trim() || fallback;
+
+  const mergedEducation =
+    profilePatch.education?.some((e) => e.degree?.trim() || e.school?.trim())
+      ? profilePatch.education.map((entry) => normalizeEducationEntry(entry))
+      : localSeed.education;
+
+  const mergedSkills =
+    profilePatch.skills?.some((s) => s.trim()) ? profilePatch.skills.filter(Boolean) : localSeed.skills || [];
+
+  const mergedExperience =
+    experience.length && experience.some((j) => j.company?.trim() || j.jobTitle?.trim())
+      ? dedupeWorkExperience(experience)
+      : localSeed.experience || [];
+
+  const currentFromExp =
+    mergedExperience.find((job) => /^present$/i.test(job.endDate || '')) ||
+    mergedExperience[0];
+
+  return {
+    firstName: pick(profilePatch.firstName, localSeed.firstName),
+    lastName: pick(profilePatch.lastName, localSeed.lastName),
+    email: pick(profilePatch.email, localSeed.email),
+    phone: pick(profilePatch.phone, localSeed.phone),
+    city: pick(profilePatch.city, localSeed.city),
+    state: pick(profilePatch.state, localSeed.state),
+    country: pick(profilePatch.country, localSeed.country, 'United States'),
+    postalCode: pick(profilePatch.postalCode, localSeed.postalCode),
+    role: pick(profilePatch.role, localSeed.role),
+    linkedin: pick(profilePatch.linkedin, localSeed.linkedin),
+    github: pick(profilePatch.github, localSeed.github),
+    portfolio: pick(profilePatch.portfolio, localSeed.portfolio),
+    website: pick(profilePatch.website, localSeed.website),
+    summary: '',
+    competencies: [],
+    skills: mergedSkills,
+    education: mergedEducation || [],
+    experience: mergedExperience,
+    currentCompany: currentFromExp?.company?.trim() || localSeed.currentCompany || '',
+    currentlyWorking: mergedExperience.some((job) => /^present$/i.test(job.endDate || '')),
+  };
+}
 
 export type ResumeParseQuality = 'full' | 'partial' | 'minimal';
 
@@ -800,4 +927,83 @@ export function buildParsedResumeFromForm(state: {
     sourceFilePath: state.sourceFilePath || state.resumeFile,
     scannedAt: state.scannedAt || new Date().toISOString(),
   };
+}
+
+/** Zod enum aligned with `CredentialType`. */
+export const credentialTypeSchema = z.enum([
+  'degree',
+  'certificate',
+  'certification',
+  'license',
+  'bootcamp',
+  'other',
+]);
+
+/** JSON Resume `work[]` item — mapped to WorkExperience. */
+export const workExperienceSchema = z.object({
+  jobTitle: z.string().default(''),
+  company: z.string().default(''),
+  location: z.string().optional().default(''),
+  startDate: z.string().default(''),
+  endDate: z.string().default(''),
+  bullets: z.array(z.string()).default(['']),
+});
+
+/** JSON Resume `education[]` item — mapped to EducationEntry. */
+export const educationEntrySchema = z.object({
+  credentialType: credentialTypeSchema.default('degree'),
+  degree: z.string().default(''),
+  fieldOfStudy: z.string().optional().default(''),
+  school: z.string().default(''),
+  location: z.string().optional().default(''),
+  startDate: z.string().optional().default(''),
+  endDate: z.string().optional().default(''),
+  honors: z.string().optional().default(''),
+});
+
+/**
+ * Full parsed resume schema — extends JSON Resume basics/work/education/skills
+ * with AutoApplyAI profile and application fields.
+ */
+export const parsedResumeSchema = z.object({
+  firstName: z.string().default(''),
+  lastName: z.string().default(''),
+  middleName: z.string().optional(),
+  preferredName: z.string().optional(),
+  legalName: z.string().optional(),
+  email: z.string().default(''),
+  phone: z.string().default(''),
+  phoneCountry: z.string().optional(),
+  phoneType: z.string().optional(),
+  city: z.string().default(''),
+  state: z.string().default(''),
+  country: z.string().default('United States'),
+  postalCode: z.string().optional(),
+  role: z.string().default(''),
+  summary: z.string().default(''),
+  competencies: z.array(z.string()).default([]),
+  skills: z.array(z.string()).default([]),
+  experience: z.array(workExperienceSchema).default([]),
+  education: z.array(educationEntrySchema).default([]),
+  currentCompany: z.string().default(''),
+  currentlyWorking: z.boolean().default(false),
+  highestDegree: z.string().optional().default(''),
+  linkedin: z.string().optional(),
+  github: z.string().optional(),
+  portfolio: z.string().optional(),
+  website: z.string().optional(),
+  otherLinks: z.array(z.string()).optional(),
+  languages: z.array(z.string()).optional(),
+  workAuthorizationUS: z.string().optional(),
+  requiresSponsorship: z.string().optional(),
+});
+
+/** Partial schema for enrichment passes, salvage, and LLM output coercion. */
+export const parsedResumePartialSchema = parsedResumeSchema.partial();
+
+export type ParsedResumeSchemaOutput = z.infer<typeof parsedResumeSchema>;
+
+/** Validate and coerce unknown LLM payloads at runtime. */
+export function safeParseResumePayload(value: unknown) {
+  return parsedResumePartialSchema.safeParse(value);
 }

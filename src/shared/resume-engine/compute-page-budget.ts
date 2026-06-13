@@ -70,7 +70,7 @@ export function getLayoutBudgetForPages(pages: number): ResumeLayoutBudget {
       return {
         pages: 1,
         summarySentencesMax: 4,
-        coreCompetenciesCount: 6,
+        coreCompetenciesCount: 4,
         maxBulletsPerRole: 4,
         maxRolesDetailed: 3,
         maxSkillsTotal: 28,

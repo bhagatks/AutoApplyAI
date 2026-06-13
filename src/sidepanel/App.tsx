@@ -23,11 +23,15 @@ import { subscribeToJobs, deleteJobFromDb, signInWithGoogleTokens, signInWithChr
 import { encryptKey, decryptKey } from '../shared/crypto';
 import { onAuthStateChanged, signOut, User } from 'firebase/auth';
 import MicroOnboarding from './components/MicroOnboarding';
+import TraceLogPanel from './components/TraceLogPanel';
 import HomeScreen from './components/HomeScreen';
+import ResumePrintPreview from './components/ResumePrintPreview';
+import ReportProblemModal, { ReportProblemIconButton } from './components/ReportProblemModal';
 import BrandWordmark from '../shared/BrandWordmark';
 import BrandLockup from '../shared/BrandLockup';
 import { loadLocalSettings, saveSettings, clearAllLocalAppData, getChromeLocal, setChromeLocal, removeChromeLocal, addChromeLocalChangedListener } from '../shared/storage';
 import { loadPipelineQueue, loadPipelineSettings, mergePipelineWithFirestore, isJobActivelyTailoring } from '../shared/pipeline-storage';
+import { traceLog } from '../shared/trace-logger';
 import { saveArtifactsForJob } from '../shared/save-job-artifacts';
 import { buildResumeLatex, buildCoverLetterLatex } from '../shared/latex-templates';
 import { JobFitPanel } from '../shared/JobFitPanel';
@@ -42,7 +46,11 @@ import {
   signInWithFreshChromeToken,
   trySilentChromeAuthRefresh,
 } from '../shared/auth-recovery';
-import { isCustomerConfigComplete, parsedResumeToBaseProfile, resolveEducationEntries } from '../shared/resume-types';
+import { isCustomerConfigComplete, parsedResumeToBaseProfile } from '../shared/resume-types';
+import {
+  buildMasterResumePreviewFromJob,
+  renderMasterResumePreviewHtml,
+} from '../shared/resume-preview-model';
 import { ToastStack, useToast } from '../shared/Toast';
 
 const DEFAULT_RULES: ResumeRules = {
@@ -128,6 +136,7 @@ export default function App() {
 
   // Settings Modal State
   const [showSettings, setShowSettings] = useState(false);
+  const [showReportModal, setShowReportModal] = useState(false);
   const [apiKey, setApiKey] = useState('');
   const [draftProvider, setDraftProvider] = useState<'gemini' | 'openai' | 'anthropic' | 'grok'>('gemini');
   const [draftModel, setDraftModel] = useState<string>('');
@@ -145,12 +154,17 @@ export default function App() {
   const [encryptedKeyCiphertext, setEncryptedKeyCiphertext] = useState('');
   const [decryptionError, setDecryptionError] = useState('');
 
-  // Diagnostic Logs
-  const [debugLogs, setDebugLogs] = useState<string[]>([]);
-  const logDebug = (msg: string, ...args: any[]) => {
-    const formatted = msg + (args.length ? ' ' + args.map(a => typeof a === 'object' ? JSON.stringify(a) : String(a)).join(' ') : '');
-    console.log('[DEBUG]', formatted);
-    setDebugLogs(prev => [...prev.slice(-49), `[${new Date().toLocaleTimeString()}] ${formatted}`]);
+  // Diagnostic logging (routes to shared trace buffer)
+  const logDebug = (msg: string, ...args: unknown[]) => {
+    const meta =
+      args.length > 0
+        ? {
+            detail: args
+              .map((a) => (typeof a === 'object' ? JSON.stringify(a) : String(a)))
+              .join(' '),
+          }
+        : undefined;
+    traceLog.info('AUTH', 'sidepanel', msg, meta);
   };
 
   const { toasts, showToast, dismissToast } = useToast();
@@ -1035,105 +1049,23 @@ export default function App() {
 
   // Print trigger
   const handlePrint = () => {
+    if (!selectedJob) return;
     const printWindow = window.open('', '_blank');
     if (!printWindow) return;
 
-    const printStyles = `
-      body {
-        font-family: 'Times New Roman', Times, serif;
-        color: #000;
-        padding: 0.35in;
-        line-height: 1.35;
-      }
-      .center { text-align: center; }
-      .bold { font-weight: bold; }
-      h2 { font-size: 16pt; margin-bottom: 2pt; margin-top: 0; }
-      .contact { font-size: 9.5pt; margin-bottom: 8pt; }
-      .role { font-size: 11pt; margin-bottom: 12pt; }
-      .section-header {
-        border-bottom: 1px solid #000;
-        font-size: 10.5pt;
-        font-weight: bold;
-        text-transform: uppercase;
-        margin-top: 14pt;
-        margin-bottom: 6pt;
-        padding-bottom: 1pt;
-      }
-      .summary { font-size: 9pt; text-align: center; margin-bottom: 10pt; }
-      .line { display: flex; justify-content: space-between; font-size: 9pt; font-weight: bold; margin-top: 6pt; }
-      .subline { display: flex; justify-content: space-between; font-size: 8.5pt; font-style: italic; margin-bottom: 4pt; }
-      ul { list-style-type: disc; padding-left: 15pt; margin-bottom: 6pt; margin-top: 2pt; }
-      li { font-size: 9pt; text-align: justify; margin-bottom: 3pt; }
-      @media print {
-        body { padding: 0; }
-      }
-    `;
+    const rules: ResumeRules = JSON.parse(customRules);
+    const model = buildMasterResumePreviewFromJob(
+      selectedJob,
+      rules,
+      candidateProfile,
+      customerConfig?.parsedResume
+    );
+    const html = renderMasterResumePreviewHtml(
+      model,
+      `${selectedJob.companyName || 'Resume'}_Tailored_Resume`
+    );
 
-    const compBullets = selectedJob?.competencies
-      .split('\n')
-      .map(line => {
-        const itemText = line.replace(/\\item\s*/, '').trim();
-        const boldText = itemText.replace(/\\textbf\{(.*?)\}/g, '<strong>$1</strong>');
-        return `<li>${boldText}</li>`;
-      })
-      .join('') || '';
-
-    const summaryText = selectedJob?.summary || '';
-    const skills = customerConfig?.parsedResume?.skills?.filter(Boolean) || [];
-    const experience = (customerConfig?.parsedResume?.experience || [])
-      .filter((job) => job.company?.trim() || job.jobTitle?.trim())
-      .slice(0, 3);
-    const education = resolveEducationEntries(customerConfig?.parsedResume)
-      .filter((e) => e.degree?.trim() || e.school?.trim());
-
-    const skillsHtml = skills.length
-      ? `<div class="section-header">Technical Skills</div><p style="font-size:9pt">${skills.join(', ')}</p>`
-      : '';
-
-    const experienceHtml = experience.map((job) => {
-      const bullets = (job.bullets || []).filter(Boolean).slice(0, 4)
-        .map((b) => `<li>${b.replace(/\\textbf\{(.*?)\}/g, '<strong>$1</strong>')}</li>`)
-        .join('');
-      return `
-          <div class="line"><span>${job.company}</span><span>${job.location || ''}</span></div>
-          <div class="subline"><span>${job.jobTitle}</span><span>${[job.startDate, job.endDate].filter(Boolean).join(' -- ')}</span></div>
-          <ul>${bullets}</ul>`;
-    }).join('');
-
-    const educationHtml = education.map((entry) => {
-      const label = [entry.degree, entry.fieldOfStudy, entry.school].filter(Boolean).join(' | ');
-      return `<li><strong>${label}</strong></li>`;
-    }).join('');
-
-    printWindow.document.write(`
-      <html>
-        <head>
-          <title>${selectedJob?.companyName || 'Resume'}_Tailored_Resume</title>
-          <style>${printStyles}</style>
-        </head>
-        <body>
-          <div class="center">
-            <h2 class="bold">${(candidateProfile.firstName || 'f_name').toUpperCase()} ${(candidateProfile.lastName || 'l_name').toUpperCase()}</h2>
-            <div class="contact">${candidateProfile.location || ''}  |  ${candidateProfile.phone || ''}  |  ${candidateProfile.email || ''}  |  ${candidateProfile.linkedin || ''}</div>
-            <div class="role bold">${(selectedJob?.jobTitle || '').toUpperCase()}</div>
-          </div>
-
-          <div class="summary">${summaryText}</div>
-
-          <div class="section-header">Core AI Competencies and Technical Leadership</div>
-          <ul>${compBullets}</ul>
-
-          ${skillsHtml}
-
-          <div class="section-header">Professional Experience</div>
-          ${experienceHtml}
-
-          <div class="section-header">Education and Certifications</div>
-          <ul>${educationHtml}</ul>
-        </body>
-      </html>
-    `);
-
+    printWindow.document.write(html);
     printWindow.document.close();
     printWindow.focus();
     setTimeout(() => {
@@ -1189,29 +1121,7 @@ export default function App() {
             By signing in, you agree to secure data backup under your Google Account on Cloud Firestore.
           </div>
 
-          <div style={{ marginTop: 12, textAlign: 'left', borderTop: '1px dashed var(--panel-border)', paddingTop: 12 }}>
-            <details>
-              <summary style={{ fontSize: '0.72rem', color: 'var(--text-secondary)', cursor: 'pointer', userSelect: 'none', fontWeight: 600 }}>
-                Diagnostic Debug Logs ({debugLogs.length})
-              </summary>
-              <div style={{
-                marginTop: 8,
-                maxHeight: 180,
-                overflowY: 'auto',
-                background: 'var(--panel-bg)',
-                border: '1px solid var(--panel-border)',
-                borderRadius: 6,
-                padding: 10,
-                fontFamily: 'monospace',
-                fontSize: '0.68rem',
-                color: '#334155',
-                whiteSpace: 'pre-wrap',
-                textAlign: 'left'
-              }}>
-                {debugLogs.length === 0 ? 'No logs captured yet. Try signing in/out.' : debugLogs.join('\n')}
-              </div>
-            </details>
-          </div>
+          <TraceLogPanel maxHeight={180} defaultOpen />
         </div>
       </div>
     );
@@ -1248,7 +1158,17 @@ export default function App() {
             }
           }}
           onSignOut={handleSignOut}
+          onOpenReport={() => setShowReportModal(true)}
         />
+        {showReportModal && (
+          <ReportProblemModal
+            userId={currentUser.uid}
+            userEmail={currentUser.email || customerConfig?.candidateProfile?.email}
+            screen="onboarding"
+            onClose={() => setShowReportModal(false)}
+            showToast={showToast}
+          />
+        )}
       </div>
     );
   }
@@ -1297,6 +1217,11 @@ export default function App() {
           >
             <RefreshCw size={16} className={isRefreshing ? 'animate-spin' : ''} />
           </button>
+
+          <ReportProblemIconButton
+            onClick={() => setShowReportModal(true)}
+            style={{ padding: '8px' }}
+          />
 
           <button onClick={openSettings} className="btn" style={{ padding: '8px' }}>
             <Settings size={18} />
@@ -1520,7 +1445,7 @@ export default function App() {
                       </div>
                     )}
 
-                    {activeTab === 'preview' && (
+                    {activeTab === 'preview' && selectedJob && (
                       <div>
                         <div style={{ display: 'flex', gap: 12, marginBottom: 12 }}>
                           <button onClick={handlePrint} className="btn btn-primary">
@@ -1528,70 +1453,12 @@ export default function App() {
                           </button>
                         </div>
 
-                        <div className="resume-preview-container">
-                          <div className="resume-preview-title">{(candidateProfile.firstName || 'f_name').toUpperCase()} {(candidateProfile.lastName || 'l_name').toUpperCase()}</div>
-                          <div className="resume-preview-contact">
-                            {candidateProfile.location || ''}  |  {candidateProfile.phone || ''}  |  {candidateProfile.email || ''}  |  {candidateProfile.linkedin || ''}
-                          </div>
-                          <div className="resume-preview-role">{(selectedJob.jobTitle || '').toUpperCase()}</div>
-
-                          <div className="resume-preview-section">Professional Summary</div>
-                          <div className="resume-preview-summary">{selectedJob.summary}</div>
-
-                          <div className="resume-preview-section">Core AI Competencies & Technical Leadership</div>
-                          <ul className="resume-preview-bullets">
-                            {selectedJob.competencies
-                              .split('\n')
-                              .map((line, i) => {
-                                const bullet = line.replace(/\\item\s*/, '').replace(/\\textbf\{(.*?)\}/g, '$1');
-                                return <li key={i}>{bullet}</li>;
-                              })}
-                          </ul>
-
-                          {customerConfig?.parsedResume?.skills?.length ? (
-                            <>
-                              <div className="resume-preview-section">Technical Skills</div>
-                              <div className="resume-preview-summary">
-                                {customerConfig.parsedResume.skills.join(', ')}
-                              </div>
-                            </>
-                          ) : null}
-
-                          <div className="resume-preview-section">Professional Experience</div>
-                          {(customerConfig?.parsedResume?.experience || [])
-                            .filter((job) => job.company?.trim() || job.jobTitle?.trim())
-                            .slice(0, 3)
-                            .map((job, idx) => (
-                              <React.Fragment key={`exp-${idx}`}>
-                                <div className="resume-preview-header-line">
-                                  <span>{job.company}</span>
-                                  <span>{job.location || ''}</span>
-                                </div>
-                                <div className="resume-preview-subline">
-                                  <span>{job.jobTitle}</span>
-                                  <span>{[job.startDate, job.endDate].filter(Boolean).join(' -- ')}</span>
-                                </div>
-                                <ul className="resume-preview-bullets">
-                                  {(job.bullets || []).filter(Boolean).slice(0, 4).map((bullet, bi) => (
-                                    <li key={bi}>
-                                      {bullet.replace(/\\textbf\{(.*?)\}/g, '$1')}
-                                    </li>
-                                  ))}
-                                </ul>
-                              </React.Fragment>
-                            ))}
-
-                          <div className="resume-preview-section">Education and Certifications</div>
-                          <ul className="resume-preview-bullets">
-                            {resolveEducationEntries(customerConfig?.parsedResume)
-                              .filter((e) => e.degree?.trim() || e.school?.trim())
-                              .map((entry, i) => (
-                                <li key={i}>
-                                  {[entry.degree, entry.fieldOfStudy, entry.school].filter(Boolean).join(' | ')}
-                                </li>
-                              ))}
-                          </ul>
-                        </div>
+                        <ResumePrintPreview
+                          job={selectedJob}
+                          rules={JSON.parse(customRules) as ResumeRules}
+                          profile={candidateProfile}
+                          parsedResume={customerConfig?.parsedResume}
+                        />
                       </div>
                     )}
                   </div>
@@ -1610,6 +1477,10 @@ export default function App() {
           </main>
         )}
 
+      </div>
+
+      <div style={{ padding: '8px 12px', borderTop: '1px dashed var(--panel-border)' }}>
+        <TraceLogPanel maxHeight={140} />
       </div>
 
       {/* Settings Modal */}
@@ -2003,6 +1874,10 @@ export default function App() {
               )}
             </div>
 
+            <div style={{ padding: '0 16px 12px' }}>
+              <TraceLogPanel maxHeight={160} />
+            </div>
+
             <div className="modal-footer" style={{ display: 'flex', justifyContent: 'space-between', width: '100%' }}>
               <div>
                 {currentUser && (
@@ -2103,6 +1978,16 @@ export default function App() {
             </div>
           </div>
         </div>
+      )}
+
+      {showReportModal && currentUser && (
+        <ReportProblemModal
+          userId={currentUser.uid}
+          userEmail={currentUser.email || customerConfig?.candidateProfile?.email}
+          screen="home"
+          onClose={() => setShowReportModal(false)}
+          showToast={showToast}
+        />
       )}
     </div>
   );

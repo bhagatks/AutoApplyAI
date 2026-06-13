@@ -1,5 +1,7 @@
 /** Serializes Gemini generateContent calls with spacing to avoid 429 rate limits. */
 
+import { traceLog } from './trace-logger';
+
 const DEFAULT_MIN_DELAY_MS = 1_200;
 const DEFAULT_RATE_LIMIT_COOLDOWN_MS = 6_000;
 
@@ -33,6 +35,9 @@ let rateLimitCooldownMs = DEFAULT_RATE_LIMIT_COOLDOWN_MS;
 
 export function notifyGeminiRateLimited(extraCooldownMs = rateLimitCooldownMs): void {
   cooldownUntil = Math.max(cooldownUntil, Date.now() + extraCooldownMs);
+  traceLog.warn('QUEUE', 'gemini_rate_limit', 'rate limited — cooldown applied', {
+    cooldownMs: extraCooldownMs,
+  });
 }
 
 export function resetGeminiRequestQueueForTests(): void {
@@ -124,6 +129,7 @@ export function enqueueGeminiRequest<T>(
     };
 
     signal?.addEventListener('abort', task.onAbort, { once: true });
+    traceLog.debug('QUEUE', 'enqueue', 'gemini request queued', { queueDepth: queue.length + 1 });
     queue.push(task as QueueTask<unknown>);
     void drainQueue();
   });
