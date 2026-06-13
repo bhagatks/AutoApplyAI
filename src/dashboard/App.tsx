@@ -16,16 +16,24 @@ import {
 } from 'lucide-react';
 
 import { Job, ResumeRules, BaseProfile, CustomerConfig } from '../shared/types';
-import { getHistoricalTitles, cleanLatex, substituteForbiddenWords, injectTokensIntoTemplate, normalizeName } from '../shared/utils';
-import { runPass1Generate, runPass2Optimize } from '../shared/ai';
-import { subscribeToJobs, saveJobToDb, deleteJobFromDb, auth, saveCustomerConfig, getCustomerConfig } from '../shared/db';
+import { normalizeName } from '../shared/utils';
+import { formatAiErrorToast, getAiErrorToastVariant } from '../shared/ai-errors';
+import { executeTailorJob } from '../shared/tailor-job';
+import { subscribeToJobs, deleteJobFromDb, auth, saveCustomerConfig, getCustomerConfig, prepareFirestoreAccess } from '../shared/db';
+import { clearAllLocalAppData } from '../shared/storage';
 import { onAuthStateChanged, signOut, signInWithPopup, GoogleAuthProvider, User } from 'firebase/auth';
-import MicroOnboarding from '../sidepanel/components/MicroOnboarding';
+import ExtensionSetupPrompt from './components/ExtensionSetupPrompt';
+import BrandWordmark from '../shared/BrandWordmark';
+import BrandLockup from '../shared/BrandLockup';
+import { isCustomerConfigComplete, resolveEducationEntries, getParsedResumeBaseVersion } from '../shared/resume-types';
+import { buildResumeLatex, buildCoverLetterLatex } from '../shared/latex-templates';
+import { ToastStack, useToast } from '../shared/Toast';
+import { JobFitPanel, jobListFitBadge } from '../shared/JobFitPanel';
 
 const DEFAULT_RULES: ResumeRules = {
   profile: {
-    candidate_name: "Bhagath Siddi",
-    output_naming_convention: "bhagath_resume_{company}_{title}"
+    candidate_name: "f_name l_name",
+    output_naming_convention: "f_name_resume_{company}_{title}"
   },
   syntax_constraints: {
     latex_compatibility: "Overleaf and Tectonic strict validation",
@@ -63,12 +71,12 @@ const DEFAULT_RULES: ResumeRules = {
 };
 
 const DEFAULT_PROFILE: BaseProfile = {
-  firstName: "Bhagath",
-  lastName: "Siddi",
-  email: "bhagathsiddi@gmail.com",
+  firstName: "f_name",
+  lastName: "l_name",
+  email: "f_namel_name@gmail.com",
   phone: "555-555-5555",
   location: "Prosper, TX 75078",
-  linkedin: "linkedin.com/in/bhagathsiddi",
+  linkedin: "linkedin.com/in/f_namel_name",
   role: "DIRECTOR OF AI ENGINEERING | STRATEGY & ENTERPRISE ML LIFE-CYCLE",
   summary: "Visionary, truth-driven Engineering Leader with 20 plus years of software experience, specializing in building and scaling high-performing AI/ML teams from the ground up. Proven track record of executing strategic technical roadmaps, driving rapid proof-of-concept development, and deploying production-grade agentic workflows and LLM applications at scale. Grounded in logic and a collaborative culture of inclusion, balancing aggressive execution timelines with a customer-centric focus on humanity and clinical operational excellence.",
   competencies: [
@@ -79,87 +87,6 @@ const DEFAULT_PROFILE: BaseProfile = {
     "Team Scaling, Culture & Ethics: Dedicated to cultivating a healthy, generative, and inclusive team culture focused on technical excellence, talent mentorship, diversity, and responsible AI principles covering fairness, transparency, and clinical data governance."
   ]
 };
-
-const BASE_LATEX_TEMPLATE = `% --- PACKAGED BASE RESUME TEMPLATE ---
-\\documentclass[9pt, letterpaper]{extarticle}
-\\usepackage[utf8]{inputenc}
-\\usepackage[margin=0.3in]{geometry}
-\\usepackage{titlesec}
-\\usepackage{enumitem}
-\\usepackage{hyperref}
-\\usepackage{xcolor}
-
-\\definecolor{trorange}{RGB}{255, 128, 0}
-\\urlstyle{same}
-
-\\titleformat{\\section}{\\large\\bfseries\\color{trorange}\\uppercase}{}{0em}{}[\\titrule]
-\\titlespacing{\\section}{0pt}{12pt}{4pt}
-\\setlist[itemize]{noitemsep, topsep=1pt, parsep=1pt, partopsep=0pt, leftmargin=12pt}
-
-\\begin{document}
-
-\\begin{center}
-    {\\huge \\textbf{%TOKEN_FIRST_NAME% %TOKEN_LAST_NAME%}} \\\\
-    \\vspace{2pt}
-    \\small %TOKEN_LOCATION% \\ | \\ %TOKEN_PHONE% \\ | \\ \\href{mailto:%TOKEN_EMAIL%}{%TOKEN_EMAIL%} \\ | \\ \\href{https://%TOKEN_LINKEDIN%}{%TOKEN_LINKEDIN%} \\\\
-    \\vspace{4pt} 
-    \\textbf{\\large %TOKEN_ROLE_ZONE%}
-\\end{center}
-
-\\vspace{-4pt}
-\\begin{quote}
-\\small \\centering
-%TOKEN_SUMMARY_ZONE%
-\\end{quote}
-
-\\vspace{-4pt}
-
-\\section{Core AI Competencies \\& Technical Leadership}
-\\begin{itemize}
-%TOKEN_COMPETENCIES_ZONE%
-\\end{itemize}
-
-\\section{Professional Experience}
-
-\\textbf{7-Eleven} \\hfill \\textbf{Frisco/Dallas, TX} \\\\
-\\textit{%TOKEN_7ELEVEN_TITLE_ZONE%} \\hfill \\textbf{2024 -- 2026}
-\\begin{itemize}
-    \\item \\textbf{AI Strategy \\& Product Development:} Spearheaded the adoption of advanced engineering practices and AI-native system designs, scaling the platform to support high-volume distributed applications serving over 250 million users.
-    \\item \\textbf{Rapid Prototyping \\& Execution:} Led multi-scrum engineering teams to move fast from proof-of-concept to production-grade deployment on aggressive timelines, achieving a measurable 25\\% reduction in overall time-to-market.
-    \\item \\textbf{Data-Driven Leadership:} Exercised sound judgment and swift decision-making to optimize core product roadmaps and timeline estimations, building cross-functional consensus with stakeholders to reduce post-launch system anomalies by 30\\%.
-    \\item \\textbf{Technical Excellence \\& Mentorship:} Recruited, structured, and scaled a premier engineering branch, mentoring senior and staff engineers while establishing robust CI/CD deployment pipelines and high-velocity development lifecycles.
-\\end{itemize}
-
-\\vspace{6pt}
-
-\\textbf{CVS Health} \\hfill \\textbf{Remote} \\\\
-\\textit{%TOKEN_CVS_TITLE_ZONE%} \\hfill \\textbf{2014 -- 2023}
-\\begin{itemize}
-    \\item \\textbf{Healthcare ML \\& Core Architecture:} Owned the architecture, design, and deployment of secure applications operating in highly regulated environments, managing clinical, transactional, and claims data frameworks handling millions of secure daily operations.
-    \\item \\textbf{Team Building \\& Scale:} Built, led, and scaled distributed agile squads of 12--18 engineers across 4 cross-functional divisions, prioritizing career development plans that improved sprint velocity by 20\\% and decreased team onboarding loops by 40\\%.
-    \\item \\textbf{Cross-Functional \\& Executive Alignment:} Collaborated closely with Product, Product Design, Clinical Operations, and Delivery partners to scope high-impact initiatives, utilizing strong interpersonal and presentation skills to influence technical strategy at the level of executive leadership.
-    \\item \\textbf{Compliance \\& Distributed Systems:} Managed the end-to-end lifecycle of distributed architectures utilizing relational and NoSQL engines (MSSQL, Postgres), ensuring complete data governance, payment gateway security, and strict healthcare compliance.
-\\end{itemize}
-
-\\vspace{6pt}
-
-\\textbf{Enterprise Consultant} \\hfill \\textbf{Various} \\\\
-\\textit{Technical Lead | Senior Software Engineer} \\hfill \\textbf{2005 -- 2014} \\\\
-\\small\\textit{Client Portfolio: American Express, AT\\&T, Verizon, JPMC, Universal American, Alindus}
-\\begin{itemize}
-    \\item \\textbf{System Architecture \\& Algorithms:} Directed deep exploration into complex data structures, algorithms, and secure software engineering methodologies, constructing high-throughput distributed transaction systems that drove a 15\\% optimization in query performance.
-    \\item \\textbf{Agile Delivery \\& Integrity:} Managed task delegation and sprint velocity metrics for engineering pipelines, maintaining rigorous attention to detail and delivering production targets within fast-paced financial and telecom operational settings.
-\\end{itemize}
-
-\\section{Education, Certifications \\& Qualifications}
-\\begin{itemize}
-    \\item \\textbf{Applied Agentic AI for Organizational Transformation} | MIT Professional Education (2026)
-    \\item \\textbf{AWS Certified Solutions Architect -- Professional} | \\href{https://www.credly.com/badges/7ef67d8d-67f2-4036-a8bf-8bbe73098a1f/linked_in?t=teze8g}{Credential Verification Link}
-    \\item \\textbf{Bachelor of Technology (B.Tech) in Computer Science \\& Engineering} | Kakatiya University, India
-    \\item \\textbf{Technical Stack Summary:} Python, PyTorch, TensorFlow, Azure ML, Databricks, Spark, Delta Lake, Azure DevOps, AWS Serverless, Lambda, JavaScript, MSSQL, Postgres, DynamoDB, Salesforce, React, TypeScript, SQL, GitHub, Jira Cloud.
-\\end{itemize}
-
-\\end{document}`;
 
 export default function App() {
   const [currentUser, setCurrentUser] = useState<User | null>(null);
@@ -177,7 +104,7 @@ export default function App() {
   const [activeTab, setActiveTab] = useState<'analysis' | 'resume' | 'cover' | 'preview'>('analysis');
   const [authLoading, setAuthLoading] = useState(true);
   const [configLoading, setConfigLoading] = useState(true);
-  const [authLinkedStatus, setAuthLinkedStatus] = useState<string | null>(null);
+  const [authLinkedType, setAuthLinkedType] = useState<'credentials' | 'config' | null>(null);
 
   // Settings Modal State
   const [showSettings, setShowSettings] = useState(false);
@@ -190,6 +117,14 @@ export default function App() {
     setSettingsTab('api');
     setShowSettings(true);
   };
+
+  const { toasts, showToast, dismissToast } = useToast();
+  const withToasts = (node: React.ReactNode) => (
+    <>
+      {node}
+      <ToastStack toasts={toasts} onDismiss={dismissToast} />
+    </>
+  );
 
   // Load Settings and History on init
   useEffect(() => {
@@ -243,7 +178,7 @@ export default function App() {
         if (parsed && typeof parsed === 'object') {
           setCandidateProfile(parsed);
         }
-      } catch (e) {}
+      } catch (e) { }
     }
     if (savedHistory) {
       try {
@@ -251,7 +186,7 @@ export default function App() {
         if (Array.isArray(parsed)) {
           setJobs(parsed);
         }
-      } catch (e) {}
+      } catch (e) { }
     }
 
     // 2. Set up Firebase Authentication listener
@@ -267,31 +202,40 @@ export default function App() {
         }
 
         if (user) {
-          // Subscribe to Firestore for real-time updates
-          unsubJobs = subscribeToJobs(user.uid, (syncedJobs) => {
-            setJobs(syncedJobs);
-          });
-          getCustomerConfig(user.uid).then((cloudConfig) => {
-            if (cloudConfig) {
-              setCustomerConfig(cloudConfig);
-              setApiKey(cloudConfig.geminiApiKey);
-              localStorage.setItem('customer_config', JSON.stringify(cloudConfig));
-              localStorage.setItem('geminiApiKey', cloudConfig.geminiApiKey);
-              if (cloudConfig.candidateProfile) {
-                setCandidateProfile(prev => ({
-                  ...prev,
-                  firstName: cloudConfig.candidateProfile.firstName,
-                  lastName: cloudConfig.candidateProfile.lastName,
-                  email: cloudConfig.candidateProfile.email,
-                  phone: cloudConfig.candidateProfile.phone
-                }));
-              }
+          const syncCloudData = async () => {
+            const authReady = await prepareFirestoreAccess(user.uid);
+            if (!authReady) {
+              setConfigLoading(false);
+              return;
             }
-          }).catch((err) => {
-            console.error('Failed to get customer config from Firestore:', err);
-          }).finally(() => {
-            setConfigLoading(false);
-          });
+
+            unsubJobs = subscribeToJobs(user.uid, (syncedJobs) => {
+              setJobs(syncedJobs);
+            });
+            getCustomerConfig(user.uid).then((cloudConfig) => {
+              if (cloudConfig) {
+                setCustomerConfig(cloudConfig);
+                setApiKey(cloudConfig.geminiApiKey);
+                localStorage.setItem('customer_config', JSON.stringify(cloudConfig));
+                localStorage.setItem('geminiApiKey', cloudConfig.geminiApiKey);
+                if (cloudConfig.candidateProfile) {
+                  setCandidateProfile(prev => ({
+                    ...prev,
+                    firstName: cloudConfig.candidateProfile.firstName,
+                    lastName: cloudConfig.candidateProfile.lastName,
+                    email: cloudConfig.candidateProfile.email,
+                    phone: cloudConfig.candidateProfile.phone
+                  }));
+                }
+              }
+            }).catch((err) => {
+              console.error('Failed to get customer config from Firestore:', err);
+            }).finally(() => {
+              setConfigLoading(false);
+            });
+          };
+
+          syncCloudData();
         } else {
           setConfigLoading(false);
           // Reload local history if signed out
@@ -302,7 +246,7 @@ export default function App() {
               if (Array.isArray(parsed)) {
                 setJobs(parsed);
               }
-            } catch (e) {}
+            } catch (e) { }
           }
           const savedProf = localStorage.getItem('candidateProfile');
           if (savedProf) {
@@ -311,7 +255,7 @@ export default function App() {
               if (parsed && typeof parsed === 'object') {
                 setCandidateProfile(parsed);
               }
-            } catch (e) {}
+            } catch (e) { }
           }
         }
       });
@@ -338,24 +282,24 @@ export default function App() {
   // Google Sign-In via standard Firebase redirect/popup
   const handleGoogleSignIn = async () => {
     if (!auth) {
-      alert('Firebase Auth is not configured.');
+      showToast('Firebase Auth is not configured.', 'error');
       return;
     }
     try {
       const provider = new GoogleAuthProvider();
       const result = await signInWithPopup(auth, provider);
-      
+
       // Check if this is the extension auth redirect flow
       const params = new URLSearchParams(window.location.search);
       const isExtensionFlow = params.get('origin') === 'extension';
       const extId = params.get('extId');
-      
+
       if (isExtensionFlow && extId) {
         const credential = GoogleAuthProvider.credentialFromResult(result);
         if (credential) {
           const idToken = credential.idToken;
           const accessToken = credential.accessToken;
-          
+
           if (typeof chrome !== 'undefined' && chrome.runtime && chrome.runtime.sendMessage) {
             console.log('[DEBUG LOG] Sending SIGN_IN_CREDENTIALS payload to extension:', {
               extId,
@@ -369,7 +313,7 @@ export default function App() {
             }, (response) => {
               console.log('[DEBUG LOG] Received extension SIGN_IN_CREDENTIALS response:', response);
               if (response && response.success) {
-                setAuthLinkedStatus("Your credentials have been successfully transferred and linked to the AutoApplyAI Chrome Extension! Inspect this page's developer console to check transmission details.");
+                setAuthLinkedType('credentials');
               }
             });
           }
@@ -379,21 +323,38 @@ export default function App() {
           console.log('[DEBUG LOG] Redirecting to launchWebAuthFlow loopback:', redirectUri);
           window.location.href = redirectUri;
         } else {
-          alert('Could not retrieve credentials from Google Sign-In.');
+          showToast('Could not retrieve credentials from Google Sign-In.', 'error');
         }
       }
     } catch (e) {
       console.error('Firebase Auth popup signin failed:', e);
-      alert('Google Sign-In failed.');
+      showToast('Google Sign-In failed.', 'error');
     }
   };
 
-  const handleSignOut = () => {
-    if (auth) {
-      signOut(auth).then(() => {
-        setCurrentUser(null);
-      });
+  const handleSignOut = async () => {
+    setCustomerConfig(null);
+    setApiKey('');
+    setCustomRules(JSON.stringify(DEFAULT_RULES, null, 2));
+    setCandidateProfile(DEFAULT_PROFILE);
+    setDraftProfile(DEFAULT_PROFILE);
+    setJobs([]);
+    setSelectedJob(null);
+
+    try {
+      await clearAllLocalAppData();
+    } catch (err) {
+      console.warn('Failed to clear local app data:', err);
     }
+
+    if (auth) {
+      try {
+        await signOut(auth);
+      } catch (err) {
+        console.warn('Firebase sign out failed:', err);
+      }
+    }
+    setCurrentUser(null);
   };
 
   // Save Settings Changes
@@ -403,11 +364,11 @@ export default function App() {
       JSON.parse(customRules);
       localStorage.setItem('geminiApiKey', apiKey);
       localStorage.setItem('resumeRules', customRules);
-      
+
       // Save profile
       setCandidateProfile(draftProfile);
       localStorage.setItem('candidateProfile', JSON.stringify(draftProfile));
-      
+
       if (customerConfig) {
         const updatedConfig = {
           ...customerConfig,
@@ -426,23 +387,23 @@ export default function App() {
           await saveCustomerConfig(currentUser.uid, updatedConfig);
         }
       }
-      
+
       setShowSettings(false);
-      alert('Settings saved successfully!');
+      showToast('Settings saved successfully.', 'success');
     } catch (e) {
-      alert('Invalid JSON format in Resume Rules config.');
+      showToast('Invalid JSON in Resume Rules config.', 'error');
     }
   };
 
   // Trigger manual resume tailoring flow
   const handleTailorJob = async () => {
     if (!jobDescription || jobDescription.trim().length < 50) {
-      alert('Please enter a valid job description (minimum 50 chars).');
+      showToast('Enter a valid job description (at least 50 characters).', 'warning');
       return;
     }
 
     if (!apiKey) {
-      alert('Gemini API Key is missing. Please configure it in settings.');
+      showToast('API key is missing. Configure it in Settings.', 'warning');
       openSettings();
       return;
     }
@@ -451,112 +412,58 @@ export default function App() {
     try {
       rules = JSON.parse(customRules);
     } catch (e) {
-      alert('Invalid JSON format in Resume Rules config. Please check settings.');
+      showToast('Invalid JSON in Resume Rules config. Check Settings.', 'error');
       openSettings();
       return;
     }
 
     setIsProcessing(true);
-    const jobId = `${Date.now()}_${Math.floor(Math.random() * 1000000)}`;
 
-    const initialJob: Job = {
-      id: jobId,
-      jobTitle: 'Manual Job...',
-      companyName: 'Analyzing...',
-      jobUrl: jobUrl || 'Manual Input',
-      jobDescription,
-      atsScore: 0,
-      analysis: 'Tailoring in progress...',
-      summary: '',
-      competencies: '',
-      coverLetter: '',
-      keywords: [],
-      date: new Date().toISOString(),
-      status: 'processing'
+    const syncLocalJob = async (job: Job) => {
+      setSelectedJob(job);
+      if (currentUser) return;
+      const savedHistory = localStorage.getItem('localHistory');
+      const existing: Job[] = savedHistory ? JSON.parse(savedHistory) : jobs;
+      const hasJob = existing.some((j) => j.id === job.id);
+      const updated = hasJob
+        ? existing.map((j) => (j.id === job.id ? job : j))
+        : [job, ...existing];
+      setJobs(updated);
+      localStorage.setItem('localHistory', JSON.stringify(updated));
     };
 
-    setSelectedJob(initialJob);
-
     try {
-      // Save job state
-      if (currentUser) {
-        await saveJobToDb(currentUser.uid, initialJob);
-      } else {
-        const updated = [initialJob, ...jobs];
-        setJobs(updated);
-        localStorage.setItem('localHistory', JSON.stringify(updated));
-      }
-
-      // Pass 1: Generate Tailoring
-      const pass1Result = await runPass1Generate(apiKey, jobDescription, rules, candidateProfile);
-      const tempJob = {
-        ...initialJob,
-        jobTitle: pass1Result.jobTitle || 'Role Title',
-        companyName: pass1Result.companyName || 'Company'
-      };
-      setSelectedJob(tempJob);
-
-      // Pass 2: Strict optimization sweep
-      const pass2Result = await runPass2Optimize(apiKey, jobDescription, rules, candidateProfile, {
-        jobTitle: tempJob.jobTitle,
-        companyName: tempJob.companyName,
-        summary: pass1Result.summary,
-        competencies: pass1Result.competencies,
-        cover_letter: pass1Result.cover_letter
+      const { job: finalJob } = await executeTailorJob({
+        userId: currentUser?.uid,
+        jobDescription,
+        jobUrl,
+        apiKey,
+        rules,
+        profile: candidateProfile,
+        parsedResume: customerConfig?.parsedResume,
+        provider: customerConfig?.aiProvider || 'gemini',
+        model: customerConfig?.aiModel,
+        initialJobTitle: 'Manual Job...',
+        initialCompanyName: 'Analyzing...',
+        onJobUpdate: syncLocalJob,
       });
 
-      // Escape & Substitute
-      const cleanSummary = cleanLatex(pass2Result.summary, rules, { isCompetencies: false });
-      const finalSummary = substituteForbiddenWords(cleanSummary, rules);
-
-      const cleanComp = cleanLatex(pass2Result.competencies, rules, { isCompetencies: true });
-      const finalComp = substituteForbiddenWords(cleanComp, rules);
-
-      const cleanCL = cleanLatex(pass2Result.cover_letter, rules, { isCoverLetter: true });
-      const finalCL = substituteForbiddenWords(cleanCL, rules);
-
-      const finalJob: Job = {
-        ...tempJob,
-        atsScore: pass2Result.atsScore || 92,
-        analysis: pass2Result.analysis || '',
-        summary: finalSummary,
-        competencies: finalComp,
-        coverLetter: finalCL,
-        keywords: pass2Result.keywords || [],
-        status: 'completed'
-      };
-
       setSelectedJob(finalJob);
-
-      // Save complete job state
-      if (currentUser) {
-        await saveJobToDb(currentUser.uid, finalJob);
-      } else {
-        const savedHistory = localStorage.getItem('localHistory');
-        const localHistory = savedHistory ? JSON.parse(savedHistory) : [];
-        const updatedHistory = localHistory.map((j: Job) => j.id === jobId ? finalJob : j);
-        setJobs(updatedHistory);
-        localStorage.setItem('localHistory', JSON.stringify(updatedHistory));
+      if (!currentUser) {
+        await syncLocalJob(finalJob);
       }
-
     } catch (err: any) {
       console.error(err);
-      const failedJob = {
-        ...initialJob,
-        status: 'failed' as const,
-        error: err.message || 'AI processing aborted'
-      };
-      setSelectedJob(failedJob);
-
-      if (currentUser) {
-        await saveJobToDb(currentUser.uid, failedJob);
-      } else {
-        const savedHistory = localStorage.getItem('localHistory');
-        const localHistory = savedHistory ? JSON.parse(savedHistory) : [];
-        const updatedHistory = localHistory.map((j: Job) => j.id === jobId ? failedJob : j);
-        setJobs(updatedHistory);
-        localStorage.setItem('localHistory', JSON.stringify(updatedHistory));
-      }
+      showToast(
+        formatAiErrorToast(err, {
+          provider: customerConfig?.aiProvider || 'gemini',
+          context: 'tailoring',
+        }),
+        getAiErrorToastVariant(err, {
+          provider: customerConfig?.aiProvider || 'gemini',
+          context: 'tailoring',
+        })
+      );
     } finally {
       setIsProcessing(false);
     }
@@ -583,7 +490,7 @@ export default function App() {
   // Clipboard Copier
   const copyToClipboard = (text: string) => {
     navigator.clipboard.writeText(text);
-    alert('Copied to clipboard successfully!');
+    showToast('Copied to clipboard.', 'success');
   };
 
   // Download File trigger
@@ -600,53 +507,13 @@ export default function App() {
   // Compile final full LaTeX document string
   const getFullResumeLatex = (job: Job): string => {
     const rules: ResumeRules = JSON.parse(customRules);
-    return injectTokensIntoTemplate(BASE_LATEX_TEMPLATE, {
-      jobTitle: job.jobTitle,
-      summary: job.summary,
-      competencies: job.competencies,
-      rules,
-      profile: candidateProfile,
-      keywords: job.keywords
-    });
+    return buildResumeLatex(job, rules, candidateProfile, customerConfig?.parsedResume);
   };
 
   // Compile final full LaTeX Cover letter document string
   const getCoverLetterLatex = (job: Job): string => {
     const rules: ResumeRules = JSON.parse(customRules);
-    const cleanFirstName = cleanLatex(candidateProfile.firstName || 'Bhagath', rules);
-    const cleanLastName = cleanLatex(candidateProfile.lastName || 'Siddi', rules);
-    const cleanEmail = cleanLatex(candidateProfile.email || 'bhagathsiddi@gmail.com', rules);
-    const cleanPhone = cleanLatex(candidateProfile.phone || '555-555-5555', rules);
-    const cleanLocation = cleanLatex(candidateProfile.location || 'Prosper, TX 75078', rules);
-    const cleanLinkedin = cleanLatex(candidateProfile.linkedin || 'linkedin.com/in/bhagathsiddi', rules);
-
-    const clTemplate = `\\documentclass[10pt, letterpaper]{extarticle}
-\\usepackage[utf8]{inputenc}
-\\usepackage[margin=1in]{geometry}
-\\usepackage{hyperref}
-\\usepackage{xcolor}
-\\usepackage{parskip}
-
-\\definecolor{trorange}{RGB}{255, 128, 0}
-\\urlstyle{same}
-
-\\begin{document}
-
-\\begin{center}
-    {\\huge \\textbf{${cleanFirstName.toUpperCase()} ${cleanLastName.toUpperCase()}}} \\\\
-    \\vspace{4pt}
-    \\small ${cleanLocation} \\ | \\ ${cleanPhone} \\ | \\ \\href{mailto:${cleanEmail}}{${cleanEmail}} \\ | \\ \\href{https://${cleanLinkedin}}{${cleanLinkedin}}
-\\end{center}
-
-\\vspace{5pt}
-\\hrule
-\\vspace{25pt}
-
-\\noindent
-${job.coverLetter}
-
-\\end{document}`;
-    return clTemplate;
+    return buildCoverLetterLatex(job, rules, candidateProfile, customerConfig?.parsedResume);
   };
 
   // Print trigger
@@ -657,27 +524,25 @@ ${job.coverLetter}
     const printStyles = `
       body {
         font-family: 'Times New Roman', Times, serif;
-        color: #333;
-        padding: 0.5in;
-        line-height: 1.4;
+        color: #000;
+        padding: 0.35in;
+        line-height: 1.35;
       }
       .center { text-align: center; }
       .bold { font-weight: bold; }
-      .orange { color: #ff8000; }
       h2 { font-size: 16pt; margin-bottom: 2pt; margin-top: 0; }
       .contact { font-size: 9.5pt; margin-bottom: 8pt; }
       .role { font-size: 11pt; margin-bottom: 12pt; }
       .section-header {
-        border-bottom: 1px solid #ff8000;
+        border-bottom: 1px solid #000;
         font-size: 10.5pt;
         font-weight: bold;
-        color: #ff8000;
         text-transform: uppercase;
         margin-top: 14pt;
         margin-bottom: 6pt;
         padding-bottom: 1pt;
       }
-      .summary { font-size: 9pt; text-align: justify; margin-bottom: 10pt; }
+      .summary { font-size: 9pt; text-align: center; margin-bottom: 10pt; }
       .line { display: flex; justify-content: space-between; font-size: 9pt; font-weight: bold; margin-top: 6pt; }
       .subline { display: flex; justify-content: space-between; font-size: 8.5pt; font-style: italic; margin-bottom: 4pt; }
       ul { list-style-type: disc; padding-left: 15pt; margin-bottom: 6pt; margin-top: 2pt; }
@@ -686,8 +551,6 @@ ${job.coverLetter}
         body { padding: 0; }
       }
     `;
-
-    const { title711, titleCVS } = getHistoricalTitles(selectedJob?.jobTitle || '');
 
     const compBullets = selectedJob?.competencies
       .split('\n')
@@ -699,6 +562,31 @@ ${job.coverLetter}
       .join('') || '';
 
     const summaryText = selectedJob?.summary || '';
+    const skills = customerConfig?.parsedResume?.skills?.filter(Boolean) || [];
+    const experience = (customerConfig?.parsedResume?.experience || [])
+      .filter((job) => job.company?.trim() || job.jobTitle?.trim())
+      .slice(0, 3);
+    const education = resolveEducationEntries(customerConfig?.parsedResume)
+      .filter((e) => e.degree?.trim() || e.school?.trim());
+
+    const skillsHtml = skills.length
+      ? `<div class="section-header">Technical Skills</div><p style="font-size:9pt">${skills.join(', ')}</p>`
+      : '';
+
+    const experienceHtml = experience.map((job) => {
+      const bullets = (job.bullets || []).filter(Boolean).slice(0, 4)
+        .map((b) => `<li>${b.replace(/\\textbf\{(.*?)\}/g, '<strong>$1</strong>')}</li>`)
+        .join('');
+      return `
+          <div class="line"><span>${job.company}</span><span>${job.location || ''}</span></div>
+          <div class="subline"><span>${job.jobTitle}</span><span>${[job.startDate, job.endDate].filter(Boolean).join(' -- ')}</span></div>
+          <ul>${bullets}</ul>`;
+    }).join('');
+
+    const educationHtml = education.map((entry) => {
+      const label = [entry.degree, entry.fieldOfStudy, entry.school].filter(Boolean).join(' | ');
+      return `<li><strong>${label}</strong></li>`;
+    }).join('');
 
     printWindow.document.write(`
       <html>
@@ -708,68 +596,23 @@ ${job.coverLetter}
         </head>
         <body>
           <div class="center">
-            <h2 class="bold">${(candidateProfile.firstName || 'Bhagath').toUpperCase()} ${(candidateProfile.lastName || 'Siddi').toUpperCase()}</h2>
+            <h2 class="bold">${(candidateProfile.firstName || 'f_name').toUpperCase()} ${(candidateProfile.lastName || 'l_name').toUpperCase()}</h2>
             <div class="contact">${candidateProfile.location || ''}  |  ${candidateProfile.phone || ''}  |  ${candidateProfile.email || ''}  |  ${candidateProfile.linkedin || ''}</div>
             <div class="role bold">${(selectedJob?.jobTitle || '').toUpperCase()}</div>
           </div>
 
           <div class="summary">${summaryText}</div>
 
-          <div class="section-header">Core AI Competencies & Technical Leadership</div>
+          <div class="section-header">Core AI Competencies and Technical Leadership</div>
           <ul>${compBullets}</ul>
 
+          ${skillsHtml}
+
           <div class="section-header">Professional Experience</div>
-          
-          <div class="line">
-            <span>7-Eleven</span>
-            <span>Frisco/Dallas, TX</span>
-          </div>
-          <div class="subline">
-            <span>${title711}</span>
-            <span>2024 -- 2026</span>
-          </div>
-          <ul>
-            <li><strong>AI Strategy & Product Development:</strong> Spearheaded the adoption of advanced engineering practices and AI-native system designs, scaling the platform to support high-volume distributed applications serving over 250 million users.</li>
-            <li><strong>Rapid Prototyping & Execution:</strong> Led multi-scrum engineering teams to move fast from proof-of-concept to production-grade deployment on aggressive timelines, achieving a measurable 25% reduction in overall time-to-market.</li>
-            <li><strong>Data-Driven Leadership:</strong> Exercised sound judgment and swift decision-making to optimize core product roadmaps and timeline estimations, building cross-functional consensus with stakeholders to reduce post-launch system anomalies by 30%.</li>
-            <li><strong>Technical Excellence & Mentorship:</strong> Recruited, structured, and scaled a premier engineering branch, mentoring senior and staff engineers while establishing robust CI/CD deployment pipelines and high-velocity development lifecycles.</li>
-          </ul>
+          ${experienceHtml}
 
-          <div class="line">
-            <span>CVS Health</span>
-            <span>Remote</span>
-          </div>
-          <div class="subline">
-            <span>${titleCVS}</span>
-            <span>2014 -- 2023</span>
-          </div>
-          <ul>
-            <li><strong>Healthcare ML & Core Architecture:</strong> Owned the architecture, design, and deployment of secure applications operating in highly regulated environments, managing clinical, transactional, and claims data frameworks handling millions of secure daily operations.</li>
-            <li><strong>Team Building & Scale:</strong> Built, led, and scaled distributed agile squads of 12--18 engineers across 4 cross-functional divisions, prioritizing career development plans that improved sprint velocity by 20% and decreased team onboarding loops by 40%.</li>
-            <li><strong>Cross-Functional & Executive Alignment:</strong> Collaborated closely with Product, Product Design, Clinical Operations, and Delivery partners to scope high-impact initiatives, utilizing strong interpersonal and presentation skills to influence technical strategy at the level of executive leadership.</li>
-            <li><strong>Compliance & Distributed Systems:</strong> Managed the end-to-end lifecycle of distributed architectures utilizing relational and NoSQL engines (MSSQL, Postgres), ensuring complete data governance, payment gateway security, and strict healthcare compliance.</li>
-          </ul>
-
-          <div class="line">
-            <span>Enterprise Consultant</span>
-            <span>Various</span>
-          </div>
-          <div class="subline">
-            <span>Technical Lead | Senior Software Engineer</span>
-            <span>2005 -- 2014</span>
-          </div>
-          <ul>
-            <li><strong>System Architecture & Algorithms:</strong> Directed deep exploration into complex data structures, algorithms, and secure software engineering methodologies, constructing high-throughput distributed transaction systems that drove a 15% optimization in query performance.</li>
-            <li><strong>Agile Delivery & Integrity:</strong> Managed task delegation and sprint velocity metrics for engineering pipelines, maintaining rigorous attention to detail and delivering production targets within fast-paced financial and telecom operational settings.</li>
-          </ul>
-
-          <div class="section-header">Education, Certifications & Qualifications</div>
-          <ul>
-            <li><strong>Applied Agentic AI for Organizational Transformation</strong> | MIT Professional Education (2026)</li>
-            <li><strong>AWS Certified Solutions Architect -- Professional</strong> | Credential Verification Link</li>
-            <li><strong>Bachelor of Technology (B.Tech) in Computer Science & Engineering</strong> | Kakatiya University, India</li>
-            <li><strong>Technical Stack Summary:</strong> Python, PyTorch, TensorFlow, Azure ML, Databricks, Spark, Delta Lake, Azure DevOps, AWS Serverless, Lambda, JavaScript, MSSQL, Postgres, DynamoDB, Salesforce, React, TypeScript, SQL, GitHub, Jira Cloud.</li>
-          </ul>
+          <div class="section-header">Education and Certifications</div>
+          <ul>${educationHtml}</ul>
         </body>
       </html>
     `);
@@ -786,20 +629,7 @@ ${job.coverLetter}
   const isExtensionFlow = params.get('origin') === 'extension' || localStorage.getItem('extId') !== null;
   const extId = params.get('extId') || localStorage.getItem('extId');
 
-  const isConfigComplete = (config: any): boolean => {
-    return !!(
-      config &&
-      config.customerId &&
-      config.geminiApiKey &&
-      config.outputDir &&
-      config.candidateProfile &&
-      config.candidateProfile.firstName &&
-      config.candidateProfile.lastName &&
-      config.candidateProfile.email &&
-      config.candidateProfile.phone &&
-      config.candidateProfile.resume
-    );
-  };
+  const isConfigComplete = isCustomerConfigComplete;
 
   // Link hook: if user is logged in, onboarded, and linking, send credentials and close
   useEffect(() => {
@@ -828,17 +658,17 @@ ${job.coverLetter}
           }, (response) => {
             console.log('[DEBUG LOG] Received extension GOOGLE_AUTH_SUCCESS response:', response);
             localStorage.removeItem('isExtensionFlow');
-            setAuthLinkedStatus("Your configuration settings have been successfully synced and linked to the AutoApplyAI Chrome Extension! Inspect this page's developer console to check sync details.");
+            setAuthLinkedType('config');
           });
         }
       });
     }
   }, [currentUser, customerConfig]);
 
-  if (authLinkedStatus) {
-    return (
+  if (authLinkedType) {
+    return withToasts(
       <div style={{ display: 'flex', height: '100vh', width: '100vw', justifyContent: 'center', alignItems: 'center', background: 'var(--bg-color)', padding: 24, boxSizing: 'border-box' }}>
-        <div className="detail-card" style={{ maxWidth: 450, width: '100%', padding: '40px 32px', textAlign: 'center', display: 'flex', flexDirection: 'column', gap: 24, boxShadow: '0 20px 40px rgba(0,0,0,0.06)' }}>
+        <div className="detail-card" style={{ maxWidth: 450, width: '100%', padding: '40px 32px', textAlign: 'center', display: 'flex', flexDirection: 'column', gap: 24, boxShadow: 'var(--panel-glow)' }}>
           <div style={{ display: 'flex', justifyContent: 'center' }}>
             <div style={{
               display: 'flex',
@@ -861,15 +691,25 @@ ${job.coverLetter}
               Linked Successfully!
             </h2>
             <p style={{ color: 'var(--text-secondary)', fontSize: '0.85rem', margin: 0, lineHeight: 1.4 }}>
-              {authLinkedStatus}
+              {authLinkedType === 'credentials' ? (
+                <>
+                  Your credentials have been successfully transferred and linked to the{' '}
+                  <BrandWordmark as="span" size="sm" /> Chrome Extension! Inspect this page&apos;s developer console to check transmission details.
+                </>
+              ) : (
+                <>
+                  Your configuration settings have been successfully synced and linked to the{' '}
+                  <BrandWordmark as="span" size="sm" /> Chrome Extension! Inspect this page&apos;s developer console to check sync details.
+                </>
+              )}
             </p>
             <p style={{ color: 'var(--brand-color)', fontSize: '0.78rem', fontWeight: 600, marginTop: 12 }}>
               Open DevTools Console (Right-click &rarr; Inspect &rarr; Console) to view debugging logs.
             </p>
           </div>
-          <button 
-            className="btn btn-primary" 
-            onClick={() => window.close()} 
+          <button
+            className="btn btn-primary"
+            onClick={() => window.close()}
             style={{ width: '100%', padding: '12px', borderRadius: 8, fontSize: '0.9rem' }}
           >
             Close Tab
@@ -880,7 +720,7 @@ ${job.coverLetter}
   }
 
   if (authLoading || configLoading) {
-    return (
+    return withToasts(
       <div style={{ display: 'flex', flexDirection: 'column', height: '100vh', width: '100vw', justifyContent: 'center', alignItems: 'center', background: 'var(--bg-color)', color: 'var(--text-primary)' }}>
         <Loader className="animate-spin" size={40} style={{ color: 'var(--brand-color)', marginBottom: 16 }} />
         <span style={{ fontSize: '0.9rem', color: 'var(--text-secondary)' }}>Securing connection...</span>
@@ -891,12 +731,12 @@ ${job.coverLetter}
   // 1. If not logged in, display sign in screen
   if (!currentUser) {
     if (isExtensionFlow && extId) {
-      return (
+      return withToasts(
         <div style={{ display: 'flex', height: '100vh', width: '100vw', justifyContent: 'center', alignItems: 'center', background: 'var(--bg-color)', padding: 24, boxSizing: 'border-box' }}>
-          <div className="detail-card" style={{ maxWidth: 450, width: '100%', padding: '40px 32px', textAlign: 'center', display: 'flex', flexDirection: 'column', gap: 24, boxShadow: '0 20px 40px rgba(0,0,0,0.06)' }}>
+          <div className="detail-card" style={{ maxWidth: 450, width: '100%', padding: '40px 32px', textAlign: 'center', display: 'flex', flexDirection: 'column', gap: 24, boxShadow: 'var(--panel-glow)' }}>
             <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 12 }}>
-              <img src="/logo.png" alt="AutoApplyAI Logo" style={{ width: 64, height: 64, objectFit: 'contain', borderRadius: 12 }} />
-              <h1 style={{ fontFamily: 'var(--font-title)', fontSize: '1.8rem', fontWeight: 800, background: 'linear-gradient(to right, var(--text-primary), var(--brand-color))', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent' }}>
+              <BrandLockup size="lg" />
+              <h1 style={{ fontFamily: 'var(--font-title)', fontSize: '1.8rem', fontWeight: 800, color: 'var(--brand)' }}>
                 Link Extension
               </h1>
               <p style={{ color: 'var(--text-secondary)', fontSize: '0.9rem', lineHeight: 1.5, marginTop: 4 }}>
@@ -905,16 +745,16 @@ ${job.coverLetter}
             </div>
 
             <div style={{ borderTop: '1px solid var(--panel-border)', paddingTop: 20 }}>
-              <button 
-                onClick={handleGoogleSignIn} 
-                className="btn btn-primary" 
+              <button
+                onClick={handleGoogleSignIn}
+                className="btn btn-primary"
                 style={{ width: '100%', padding: '14px', borderRadius: 8, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 10, fontSize: '0.95rem', fontWeight: 600 }}
               >
                 <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
-                  <path d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" fill="#4285F4"/>
-                  <path d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" fill="#34A853"/>
-                  <path d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.06H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.94l2.85-2.22.81-.63z" fill="#FBBC05"/>
-                  <path d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84c.87-2.6 3.3-4.52 6.16-4.52z" fill="#EA4335"/>
+                  <path d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" fill="#4285F4" />
+                  <path d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" fill="#34A853" />
+                  <path d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.06H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.94l2.85-2.22.81-.63z" fill="#FBBC05" />
+                  <path d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84c.87-2.6 3.3-4.52 6.16-4.52z" fill="#EA4335" />
                 </svg>
                 Authenticate & Link Extension
               </button>
@@ -928,30 +768,27 @@ ${job.coverLetter}
       );
     }
 
-    return (
+    return withToasts(
       <div style={{ display: 'flex', height: '100vh', width: '100vw', justifyContent: 'center', alignItems: 'center', background: 'var(--bg-color)', padding: 24, boxSizing: 'border-box' }}>
-        <div className="detail-card" style={{ maxWidth: 400, width: '100%', padding: '40px 32px', textAlign: 'center', display: 'flex', flexDirection: 'column', gap: 24, boxShadow: '0 20px 40px rgba(0,0,0,0.06)' }}>
+        <div className="detail-card" style={{ maxWidth: 400, width: '100%', padding: '40px 32px', textAlign: 'center', display: 'flex', flexDirection: 'column', gap: 24, boxShadow: 'var(--panel-glow)' }}>
           <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 12 }}>
-            <img src="/logo.png" alt="AutoApplyAI Logo" style={{ width: 48, height: 48, objectFit: 'contain', borderRadius: 8 }} />
-            <h1 style={{ fontFamily: 'var(--font-title)', fontSize: '1.6rem', fontWeight: 800, background: 'linear-gradient(to right, var(--text-primary), var(--brand-color))', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent' }}>
-              AutoApplyAI
-            </h1>
+            <BrandLockup size="lg" />
             <p style={{ color: 'var(--text-secondary)', fontSize: '0.88rem', lineHeight: 1.5, marginTop: 4 }}>
-              Accelerate your job application journey. Tailor resumes and auto-sync to Cloud Firestore.
+              Accelerate your job application journey. Tailor resumes and auto-sync to Cloud.
             </p>
           </div>
 
           <div style={{ borderTop: '1px solid var(--panel-border)', paddingTop: 16 }}>
-            <button 
-              onClick={handleGoogleSignIn} 
-              className="btn btn-primary" 
+            <button
+              onClick={handleGoogleSignIn}
+              className="btn btn-primary"
               style={{ width: '100%', padding: '12px', borderRadius: 8, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 10, fontSize: '0.9rem' }}
             >
               <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
-                <path d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" fill="#4285F4"/>
-                <path d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" fill="#34A853"/>
-                <path d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.06H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.94l2.85-2.22.81-.63z" fill="#FBBC05"/>
-                <path d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84c.87-2.6 3.3-4.52 6.16-4.52z" fill="#EA4335"/>
+                <path d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" fill="#4285F4" />
+                <path d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" fill="#34A853" />
+                <path d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.06H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.94l2.85-2.22.81-.63z" fill="#FBBC05" />
+                <path d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84c.87-2.6 3.3-4.52 6.16-4.52z" fill="#EA4335" />
               </svg>
               Sign in with Google
             </button>
@@ -965,44 +802,18 @@ ${job.coverLetter}
     );
   }
 
-  // 2. If logged in but onboarding is not completed, display onboarding screen
+  // 2. If logged in but onboarding is not completed, direct user to the extension
   if (!isConfigComplete(customerConfig)) {
-    const parts = (currentUser.displayName || '').trim().split(/\s+/);
-    const initialProfile = {
-      firstName: parts[0] || '',
-      lastName: parts.slice(1).join(' ') || '',
-      email: currentUser.email || ''
-    };
-    return (
-      <div style={{ height: '100vh', width: '100vw', background: 'var(--bg-color)', overflow: 'auto' }}>
-        <MicroOnboarding 
-          userId={currentUser.uid}
-          initialProfile={initialProfile}
-          onComplete={(config) => {
-            setCustomerConfig(config);
-            setApiKey(config.geminiApiKey);
-            if (config.candidateProfile) {
-              setCandidateProfile(prev => ({
-                ...prev,
-                firstName: config.candidateProfile.firstName,
-                lastName: config.candidateProfile.lastName,
-                email: config.candidateProfile.email,
-                phone: config.candidateProfile.phone
-              }));
-            }
-          }}
-        />
-      </div>
-    );
+    return withToasts(<ExtensionSetupPrompt onSignOut={handleSignOut} />);
   }
 
   // 3. If extension flow & already completed onboarding, show confirmation & wait for close
   if (isExtensionFlow && extId) {
-    return (
+    return withToasts(
       <div style={{ display: 'flex', height: '100vh', width: '100vw', justifyContent: 'center', alignItems: 'center', background: 'var(--bg-color)', padding: 24, boxSizing: 'border-box' }}>
-        <div className="detail-card" style={{ maxWidth: 450, width: '100%', padding: '40px 32px', textAlign: 'center', display: 'flex', flexDirection: 'column', gap: 24, boxShadow: '0 20px 40px rgba(0,0,0,0.06)' }}>
+        <div className="detail-card" style={{ maxWidth: 450, width: '100%', padding: '40px 32px', textAlign: 'center', display: 'flex', flexDirection: 'column', gap: 24, boxShadow: 'var(--panel-glow)' }}>
           <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 12 }}>
-            <img src="/logo.png" alt="AutoApplyAI Logo" style={{ width: 64, height: 64, objectFit: 'contain', borderRadius: 12 }} />
+            <BrandLockup size="lg" />
             <h1 style={{ fontFamily: 'var(--font-title)', fontSize: '1.8rem', fontWeight: 800, color: 'var(--brand-color)' }}>
               Linked Successfully
             </h1>
@@ -1015,16 +826,12 @@ ${job.coverLetter}
     );
   }
 
-  return (
+  return withToasts(
     <div className="glass-app">
       {/* Header */}
       <header className="app-header">
         <div className="logo-area">
-          <img src="/logo.png" alt="AutoApplyAI Logo" className="logo-icon" style={{ objectFit: 'contain' }} />
-          <div className="logo-text">
-            <h1>AUTOAPPLYAI</h1>
-            <span className="sub-text">Serverless Web Dashboard</span>
-          </div>
+          <BrandLockup size="md" subText="Serverless Web Dashboard" />
         </div>
 
         <div className="header-actions">
@@ -1085,7 +892,7 @@ ${job.coverLetter}
                     <span className="job-title-text" title={job.jobTitle}>
                       {job.jobTitle}
                     </span>
-                    <span className="score-badge">{job.atsScore}%</span>
+                    <span className="score-badge">{jobListFitBadge(job) || `${job.atsScore}%`}</span>
                   </div>
 
                   <div className="company-text">{job.companyName}</div>
@@ -1112,7 +919,7 @@ ${job.coverLetter}
               <div style={{ display: 'flex', alignItems: 'center', gap: 10, fontSize: '0.78rem', color: 'var(--text-secondary)' }}>
                 <Chrome size={18} style={{ color: 'var(--brand-color)' }} />
                 <span>
-                  <strong>Tip:</strong> Install the AutoApplyAI Extension to extract and tailor jobs from LinkedIn/Indeed in 1-click!
+                  <strong>Tip:</strong> Install the <BrandWordmark as="span" size="sm" /> Extension to extract and tailor jobs from LinkedIn/Indeed in 1-click!
                 </span>
               </div>
             </div>
@@ -1171,11 +978,11 @@ ${job.coverLetter}
               </div>
             ) : selectedJob.status === 'failed' ? (
               <div style={{ display: 'flex', flexDirection: 'column', height: '100%', justifyContent: 'center', alignItems: 'center', padding: 24, textAlign: 'center', background: 'var(--bg-color)' }}>
-                <div style={{ width: 48, height: 48, borderRadius: '50%', background: 'rgba(239, 68, 68, 0.1)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--danger-color)', marginBottom: 16 }}>
+                <div style={{ width: 48, height: 48, borderRadius: '50%', background: 'rgba(255, 255, 255, 0.08)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--text-secondary)', marginBottom: 16 }}>
                   <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="8" x2="12" y2="12"></line><line x1="12" y1="16" x2="12.01" y2="16"></line></svg>
                 </div>
                 <h3 style={{ fontFamily: 'var(--font-title)', fontSize: '1.2rem', fontWeight: 700, color: 'var(--danger-color)', marginBottom: 8 }}>Optimization Failed</h3>
-                <div style={{ background: '#fff', border: '1px solid rgba(239, 68, 68, 0.2)', padding: 12, borderRadius: 8, fontSize: '0.82rem', color: 'var(--text-secondary)', maxWidth: 280, marginBottom: 16, wordBreak: 'break-word', textAlign: 'left' }}>
+                <div style={{ background: 'var(--panel-bg-2)', border: '1px solid rgba(255, 107, 107, 0.25)', padding: 12, borderRadius: 8, fontSize: '0.82rem', color: 'var(--text-secondary)', maxWidth: 280, marginBottom: 16, wordBreak: 'break-word', textAlign: 'left' }}>
                   <strong>Error:</strong> {selectedJob.error || 'Unknown AI error'}
                 </div>
                 <button onClick={() => setSelectedJob(null)} className="btn btn-primary" style={{ padding: '8px 16px', fontSize: '0.85rem' }}>
@@ -1184,206 +991,187 @@ ${job.coverLetter}
               </div>
             ) : (
               <>
-              <div className="details-header-tabs">
-                <button
-                  onClick={() => setActiveTab('analysis')}
-                  className={`tab-btn ${activeTab === 'analysis' ? 'active' : ''}`}
-                >
-                  ATS Report
-                </button>
-                <button
-                  onClick={() => setActiveTab('resume')}
-                  className={`tab-btn ${activeTab === 'resume' ? 'active' : ''}`}
-                >
-                  Resume LaTeX
-                </button>
-                <button
-                  onClick={() => setActiveTab('cover')}
-                  className={`tab-btn ${activeTab === 'cover' ? 'active' : ''}`}
-                >
-                  Cover Letter
-                </button>
-                <button
-                  onClick={() => setActiveTab('preview')}
-                  className={`tab-btn ${activeTab === 'preview' ? 'active' : ''}`}
-                >
-                  Print Preview
-                </button>
-              </div>
+                <div className="details-header-tabs">
+                  <button
+                    onClick={() => setActiveTab('analysis')}
+                    className={`tab-btn ${activeTab === 'analysis' ? 'active' : ''}`}
+                  >
+                    Job fit
+                  </button>
+                  <button
+                    onClick={() => setActiveTab('resume')}
+                    className={`tab-btn ${activeTab === 'resume' ? 'active' : ''}`}
+                  >
+                    Resume LaTeX
+                  </button>
+                  <button
+                    onClick={() => setActiveTab('cover')}
+                    className={`tab-btn ${activeTab === 'cover' ? 'active' : ''}`}
+                  >
+                    Cover Letter
+                  </button>
+                  <button
+                    onClick={() => setActiveTab('preview')}
+                    className={`tab-btn ${activeTab === 'preview' ? 'active' : ''}`}
+                  >
+                    Print Preview
+                  </button>
+                </div>
 
-              <div className="details-content">
-                {activeTab === 'analysis' && (
-                  <div>
-                    <div className="detail-card" style={{ display: 'flex', gap: 24, alignItems: 'center' }}>
-                      <div
-                        style={{
-                          width: 80,
-                          height: 80,
-                          borderRadius: '50%',
-                          border: '4px solid var(--brand-color)',
-                          display: 'flex',
-                          alignItems: 'center',
-                          justifyContent: 'center',
-                          fontSize: '1.4rem',
-                          fontWeight: 800,
-                          color: '#ffffff'
-                        }}
-                      >
-                        {selectedJob.atsScore}%
+                <div className="details-content">
+                  {activeTab === 'analysis' && selectedJob && (
+                    <JobFitPanel
+                      job={selectedJob}
+                      staleProfileWarning={
+                        !!(
+                          customerConfig?.parsedResume &&
+                          selectedJob.baseVersion &&
+                          getParsedResumeBaseVersion(customerConfig.parsedResume) !== selectedJob.baseVersion
+                        )
+                      }
+                    />
+                  )}
+
+                  {activeTab === 'resume' && (
+                    <div>
+                      <div style={{ display: 'flex', gap: 12, marginBottom: 12 }}>
+                        <button
+                          onClick={() => copyToClipboard(getFullResumeLatex(selectedJob))}
+                          className="btn"
+                        >
+                          <Copy size={14} /> Copy Source
+                        </button>
+                        <button
+                          onClick={() =>
+                            triggerDownload(
+                              `${normalizeName(selectedJob.companyName)}_resume.tex`,
+                              getFullResumeLatex(selectedJob)
+                            )
+                          }
+                          className="btn"
+                        >
+                          <Download size={14} /> Download .tex
+                        </button>
                       </div>
-                      <div>
-                        <h4 style={{ fontSize: '1.1rem', marginBottom: 4 }}>ATS Compliance Match Score</h4>
-                        <p style={{ color: 'var(--text-secondary)', fontSize: '0.85rem' }}>
-                          Optimized for <strong>{selectedJob.jobTitle}</strong> at <strong>{selectedJob.companyName}</strong>.
+                      <pre className="latex-code-block">{getFullResumeLatex(selectedJob)}</pre>
+                    </div>
+                  )}
+
+                  {activeTab === 'cover' && (
+                    <div>
+                      <div style={{ display: 'flex', gap: 12, marginBottom: 12 }}>
+                        <button
+                          onClick={() => copyToClipboard(selectedJob.coverLetter)}
+                          className="btn"
+                        >
+                          <Copy size={14} /> Copy Letter
+                        </button>
+                        <button
+                          onClick={() => copyToClipboard(getCoverLetterLatex(selectedJob))}
+                          className="btn"
+                        >
+                          <Copy size={14} /> Copy LaTeX
+                        </button>
+                        <button
+                          onClick={() =>
+                            triggerDownload(
+                              `${normalizeName(selectedJob.companyName)}_coverletter.tex`,
+                              getCoverLetterLatex(selectedJob)
+                            )
+                          }
+                          className="btn"
+                        >
+                          <Download size={14} /> Download .tex
+                        </button>
+                      </div>
+                      <div className="detail-card" style={{ background: 'var(--panel-bg-2)', border: '1px solid var(--panel-border)' }}>
+                        <p className="plain-text" style={{ fontFamily: 'Georgia, serif', fontSize: '0.95rem', color: '#e2e8f0' }}>
+                          {selectedJob.coverLetter}
                         </p>
                       </div>
                     </div>
+                  )}
 
-                    <div className="detail-card">
-                      <div className="detail-card-title">Match Analysis & Insights</div>
-                      <p className="plain-text">{selectedJob.analysis}</p>
-                    </div>
+                  {activeTab === 'preview' && (
+                    <div>
+                      <div style={{ display: 'flex', gap: 12, marginBottom: 12 }}>
+                        <button onClick={handlePrint} className="btn btn-primary">
+                          <Printer size={14} /> Print to PDF
+                        </button>
+                      </div>
 
-                    <div className="detail-card">
-                      <div className="detail-card-title">ATS Keywords Injected</div>
-                      <div className="keyword-tags">
-                        {selectedJob.keywords.map((kw, i) => (
-                          <span key={i} className="keyword-tag">
-                            {kw}
-                          </span>
-                        ))}
+                      <div className="resume-preview-container">
+                        <div className="resume-preview-title">{(candidateProfile.firstName || 'f_name').toUpperCase()} {(candidateProfile.lastName || 'l_name').toUpperCase()}</div>
+                        <div className="resume-preview-contact">
+                          {candidateProfile.location || ''}  |  {candidateProfile.phone || ''}  |  {candidateProfile.email || ''}  |  {candidateProfile.linkedin || ''}
+                        </div>
+                        <div className="resume-preview-role">{(selectedJob.jobTitle || '').toUpperCase()}</div>
+
+                        <div className="resume-preview-section">Professional Summary</div>
+                        <div className="resume-preview-summary">{selectedJob.summary}</div>
+
+                        <div className="resume-preview-section">Core AI Competencies & Technical Leadership</div>
+                        <ul className="resume-preview-bullets">
+                          {selectedJob.competencies
+                            .split('\n')
+                            .map((line, i) => {
+                              const bullet = line.replace(/\\item\s*/, '').replace(/\\textbf\{(.*?)\}/g, '$1');
+                              return <li key={i}>{bullet}</li>;
+                            })}
+                        </ul>
+
+                        {customerConfig?.parsedResume?.skills?.length ? (
+                          <>
+                            <div className="resume-preview-section">Technical Skills</div>
+                            <div className="resume-preview-summary">
+                              {customerConfig.parsedResume.skills.join(', ')}
+                            </div>
+                          </>
+                        ) : null}
+
+                        <div className="resume-preview-section">Professional Experience</div>
+                        {(customerConfig?.parsedResume?.experience || [])
+                          .filter((job) => job.company?.trim() || job.jobTitle?.trim())
+                          .slice(0, 3)
+                          .map((job, idx) => (
+                            <React.Fragment key={`exp-${idx}`}>
+                              <div className="resume-preview-header-line">
+                                <span>{job.company}</span>
+                                <span>{job.location || ''}</span>
+                              </div>
+                              <div className="resume-preview-subline">
+                                <span>{job.jobTitle}</span>
+                                <span>{[job.startDate, job.endDate].filter(Boolean).join(' -- ')}</span>
+                              </div>
+                              <ul className="resume-preview-bullets">
+                                {(job.bullets || []).filter(Boolean).slice(0, 4).map((bullet, bi) => (
+                                  <li key={bi}>{bullet.replace(/\\textbf\{(.*?)\}/g, '$1')}</li>
+                                ))}
+                              </ul>
+                            </React.Fragment>
+                          ))}
+
+                        <div className="resume-preview-section">Education and Certifications</div>
+                        <ul className="resume-preview-bullets">
+                          {resolveEducationEntries(customerConfig?.parsedResume)
+                            .filter((e) => e.degree?.trim() || e.school?.trim())
+                            .map((entry, i) => (
+                              <li key={i}>
+                                {[entry.degree, entry.fieldOfStudy, entry.school].filter(Boolean).join(' | ')}
+                              </li>
+                            ))}
+                        </ul>
                       </div>
                     </div>
-                  </div>
-                )}
-
-                {activeTab === 'resume' && (
-                  <div>
-                    <div style={{ display: 'flex', gap: 12, marginBottom: 12 }}>
-                      <button
-                        onClick={() => copyToClipboard(getFullResumeLatex(selectedJob))}
-                        className="btn"
-                      >
-                        <Copy size={14} /> Copy Source
-                      </button>
-                      <button
-                        onClick={() =>
-                          triggerDownload(
-                            `${normalizeName(selectedJob.companyName)}_resume.tex`,
-                            getFullResumeLatex(selectedJob)
-                          )
-                        }
-                        className="btn"
-                      >
-                        <Download size={14} /> Download .tex
-                      </button>
-                    </div>
-                    <pre className="latex-code-block">{getFullResumeLatex(selectedJob)}</pre>
-                  </div>
-                )}
-
-                {activeTab === 'cover' && (
-                  <div>
-                    <div style={{ display: 'flex', gap: 12, marginBottom: 12 }}>
-                      <button
-                        onClick={() => copyToClipboard(selectedJob.coverLetter)}
-                        className="btn"
-                      >
-                        <Copy size={14} /> Copy Letter
-                      </button>
-                      <button
-                        onClick={() => copyToClipboard(getCoverLetterLatex(selectedJob))}
-                        className="btn"
-                      >
-                        <Copy size={14} /> Copy LaTeX
-                      </button>
-                      <button
-                        onClick={() =>
-                          triggerDownload(
-                            `${normalizeName(selectedJob.companyName)}_coverletter.tex`,
-                            getCoverLetterLatex(selectedJob)
-                          )
-                        }
-                        className="btn"
-                      >
-                        <Download size={14} /> Download .tex
-                      </button>
-                    </div>
-                    <div className="detail-card" style={{ background: '#13151c', border: '1px solid rgba(255,255,255,0.04)' }}>
-                      <p className="plain-text" style={{ fontFamily: 'Georgia, serif', fontSize: '0.95rem', color: '#e2e8f0' }}>
-                        {selectedJob.coverLetter}
-                      </p>
-                    </div>
-                  </div>
-                )}
-
-                {activeTab === 'preview' && (
-                  <div>
-                    <div style={{ display: 'flex', gap: 12, marginBottom: 12 }}>
-                      <button onClick={handlePrint} className="btn btn-primary">
-                        <Printer size={14} /> Print to PDF
-                      </button>
-                    </div>
-
-                    <div className="resume-preview-container">
-                      <div className="resume-preview-title">{(candidateProfile.firstName || 'Bhagath').toUpperCase()} {(candidateProfile.lastName || 'Siddi').toUpperCase()}</div>
-                      <div className="resume-preview-contact">
-                        {candidateProfile.location || ''}  |  {candidateProfile.phone || ''}  |  {candidateProfile.email || ''}  |  {candidateProfile.linkedin || ''}
-                      </div>
-                      <div className="resume-preview-role">{(selectedJob.jobTitle || '').toUpperCase()}</div>
-
-                      <div className="resume-preview-section">Professional Summary</div>
-                      <div className="resume-preview-summary">{selectedJob.summary}</div>
-
-                      <div className="resume-preview-section">Core AI Competencies & Technical Leadership</div>
-                      <ul className="resume-preview-bullets">
-                        {selectedJob.competencies
-                          .split('\n')
-                          .map((line, i) => {
-                            const bullet = line.replace(/\\item\s*/, '').replace(/\\textbf\{(.*?)\}/g, '$1');
-                            return <li key={i}>{bullet}</li>;
-                          })}
-                      </ul>
-
-                      <div className="resume-preview-section">Professional Experience</div>
-                      <div className="resume-preview-header-line">
-                        <span>7-Eleven</span>
-                        <span>Frisco/Dallas, TX</span>
-                      </div>
-                      <div className="resume-preview-subline">
-                        <span>{getHistoricalTitles(selectedJob.jobTitle).title711}</span>
-                        <span>2024 -- 2026</span>
-                      </div>
-                      <ul className="resume-preview-bullets">
-                        <li><strong>AI Strategy & Product Development:</strong> Spearheaded the adoption of advanced engineering practices and AI-native system designs, scaling the platform to support high-volume distributed applications serving over 250 million users.</li>
-                        <li><strong>Rapid Prototyping & Execution:</strong> Led multi-scrum engineering teams to move fast from proof-of-concept to production-grade deployment on aggressive timelines, achieving a measurable 25% reduction in overall time-to-market.</li>
-                        <li><strong>Data-Driven Leadership:</strong> Exercised sound judgment and swift decision-making to optimize core product roadmaps and timeline estimations, building cross-functional consensus with stakeholders to reduce post-launch system anomalies by 30%.</li>
-                        <li><strong>Technical Excellence & Mentorship:</strong> Recruited, structured, and scaled a premier engineering branch, mentoring senior and staff engineers while establishing robust CI/CD deployment pipelines and high-velocity development lifecycles.</li>
-                      </ul>
-
-                      <div className="resume-preview-header-line">
-                        <span>CVS Health</span>
-                        <span>Remote</span>
-                      </div>
-                      <div className="resume-preview-subline">
-                        <span>{getHistoricalTitles(selectedJob.jobTitle).titleCVS}</span>
-                        <span>2014 -- 2023</span>
-                      </div>
-                      <ul className="resume-preview-bullets">
-                        <li><strong>Healthcare ML & Core Architecture:</strong> Owned the architecture, design, and deployment of secure applications operating in highly regulated environments, managing clinical, transactional, and claims data frameworks handling millions of secure daily operations.</li>
-                        <li><strong>Team Building & Scale:</strong> Built, led, and scaled distributed agile squads of 12--18 engineers across 4 cross-functional divisions, prioritizing career development plans that improved sprint velocity by 20% and decreased team onboarding loops by 40%.</li>
-                        <li><strong>Cross-Functional & Executive Alignment:</strong> Collaborated closely with Product, Product Design, Clinical Operations, and Delivery partners to scope high-impact initiatives, utilizing strong interpersonal and presentation skills to influence technical strategy at the level of executive leadership.</li>
-                        <li><strong>Compliance & Distributed Systems:</strong> Managed the end-to-end lifecycle of distributed architectures utilizing relational and NoSQL engines (MSSQL, Postgres), ensuring complete data governance, payment gateway security, and strict healthcare compliance.</li>
-                      </ul>
-                    </div>
-                  </div>
-                )}
-              </div>
-            </>
-          )) : (
+                  )}
+                </div>
+              </>
+            )) : (
             <div className="welcome-screen">
-              <img src="/logo.png" alt="AutoApplyAI Logo" style={{ width: 64, height: 64, objectFit: 'contain', animation: 'float 4s ease-in-out infinite', marginBottom: 16 }} />
-              <h3>Welcome to AutoApplyAI</h3>
+              <BrandLockup size="lg" style={{ marginBottom: 16 }} />
+              <h3 style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', justifyContent: 'center', gap: '0.35em' }}>
+                Welcome to <BrandWordmark as="span" size="lg" />
+              </h3>
               <p>
                 Paste your target job description requirements inside the center pane to customize and optimize your resume instantly.
               </p>
@@ -1402,8 +1190,8 @@ ${job.coverLetter}
                 ✕
               </button>
             </div>
-            
-            <div className="details-header-tabs" style={{ padding: '0 20px', borderBottom: '1px solid var(--panel-border)', background: '#f8fafc' }}>
+
+            <div className="details-header-tabs" style={{ padding: '0 20px', borderBottom: '1px solid var(--panel-border)', background: 'var(--panel-bg)' }}>
               <button
                 onClick={() => setSettingsTab('api')}
                 className={`tab-btn ${settingsTab === 'api' ? 'active' : ''}`}
@@ -1618,7 +1406,7 @@ ${job.coverLetter}
                 </div>
               )}
             </div>
-            
+
             <div className="modal-footer">
               <button onClick={() => setShowSettings(false)} className="btn">
                 Cancel

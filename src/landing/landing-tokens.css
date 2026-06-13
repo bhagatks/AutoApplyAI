@@ -1,0 +1,9 @@
+/**
+ * Landing — extends shared brand tokens with marketing-specific radii
+ */
+@import '../shared/brand-tokens.css';
+
+.landing-page {
+  --card-radius: 20px;
+  --button-radius: 999px;
+}

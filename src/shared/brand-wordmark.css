@@ -1,0 +1,139 @@
+/**
+ * AutoApplyAI wordmark colors — match landing header/footer
+ */
+:root {
+  --brand-wordmark-ai: #60a5fa;
+  --brand-wordmark-on-dark: #f8fafc;
+  --brand-wordmark-on-light: #0f172a;
+}
+
+.brand-wordmark {
+  font-family: var(--font-title);
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  line-height: 1;
+}
+
+.brand-wordmark--dark {
+  color: var(--brand-wordmark-on-dark);
+}
+
+.brand-wordmark--light {
+  color: var(--brand-wordmark-on-light);
+}
+
+.brand-wordmark-ai {
+  color: var(--brand-wordmark-ai);
+}
+
+.brand-wordmark--sm {
+  font-size: 0.875rem;
+  font-weight: 600;
+}
+
+.brand-wordmark--md {
+  font-size: 1.15rem;
+  font-weight: 800;
+}
+
+.brand-wordmark--lg {
+  font-size: 1.6rem;
+  font-weight: 800;
+}
+
+.brand-wordmark--xl {
+  font-size: 1.75rem;
+  font-weight: 800;
+}
+
+.brand-wordmark--2xl {
+  font-size: 1.5rem;
+  font-weight: 800;
+  line-height: 1;
+}
+
+p .brand-wordmark,
+li .brand-wordmark {
+  display: inline;
+  white-space: nowrap;
+  vertical-align: baseline;
+}
+
+.brand-lockup {
+  display: inline-flex;
+  align-items: center;
+  gap: 12px;
+  text-decoration: none;
+  color: inherit;
+}
+
+.brand-lockup-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.brand-lockup-sub {
+  font-family: var(--font-body);
+  font-size: 0.7rem;
+  font-weight: 500;
+  color: var(--text-secondary);
+  line-height: 1.2;
+}
+
+.brand-lockup-mark {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 12px;
+  background: var(--brand-gradient);
+  box-shadow: var(--shadow-glow);
+}
+
+.brand-lockup-mark--sm {
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+}
+
+.brand-lockup-mark--sm img {
+  width: 22px;
+  height: 22px;
+  object-fit: contain;
+}
+
+.brand-lockup-mark--md {
+  width: 42px;
+  height: 42px;
+}
+
+.brand-lockup-mark--md img {
+  width: 30px;
+  height: 30px;
+  object-fit: contain;
+}
+
+.brand-lockup-mark--lg {
+  width: 48px;
+  height: 48px;
+}
+
+.brand-lockup-mark--lg img {
+  width: 34px;
+  height: 34px;
+  object-fit: contain;
+}
+
+.brand-lockup--center {
+  justify-content: center;
+  margin-left: auto;
+  margin-right: auto;
+}
+
+@media (min-width: 640px) {
+  .brand-wordmark--2xl {
+    font-size: 1.875rem;
+  }
+}

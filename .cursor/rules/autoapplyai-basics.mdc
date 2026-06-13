@@ -1,0 +1,9 @@
+---
+description: Minimal AutoApplyAI context (kept tiny to save tokens)
+alwaysApply: true
+---
+
+# AutoApplyAI
+
+Chrome Extension (MV3) + web dashboard. Stack: TypeScript, Vite, React, Tailwind, Firebase.
+Edit `src/` only — never hand-edit `dist/`. Shared code: `src/shared/`.

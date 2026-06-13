@@ -48,13 +48,13 @@ The final structure generated upon completing onboarding is:
 
 ```json
 {
-  "customerId": "customer_bhagath_siddi",
-  "geminiApiKey": "AIzaSyDLCZuzvlI0-Wp5sDvFWBlT3Wpe1oo2a7Y",
+  "customerId": "customer_fname_lname",
+  "geminiApiKey": "YOUR_GEMINI_API_KEY",
   "outputDir": "/Users/bstar/Downloads/resume_backup/",
   "candidateProfile": {
-    "firstName": "Bhagath",
-    "lastName": "Siddi",
-    "email": "bhagathsiddi@gmail.com",
+    "firstName": "f_name",
+    "lastName": "l_name",
+    "email": "f_namel_name@gmail.com",
     "phone": "555-555-5555",
     "resume": "xxx.pdf"
   }
@@ -92,3 +92,46 @@ npm run test
 - Flow resolver routes unauthenticated users to the Login panel.
 - Flow resolver routes authenticated users without complete configurations to the Onboarding gate.
 - Flow resolver successfully unlocks the main workspace once onboarding is complete.
+
+---
+
+## 5. Phase 1 Pipeline (Add → Tailor → Assist Apply)
+
+The sidepanel **Home** tab runs the application pipeline. The background service worker owns queue orchestration.
+
+### Stages
+| Stage | Meaning |
+|---|---|
+| `queued` | Job captured; waiting for tailor slot |
+| `tailoring` | AI Pass 1 + Pass 2 running (up to 2 concurrent) |
+| `tailored` | Resume/cover letter ready; artifacts saving |
+| `applying` | Tab focused; assist-apply adapter prefilling |
+| `needs_review` | Prefill done — **user submits manually** |
+| `applied` | User marked submission complete |
+| `failed` | Tailor or apply error (retry available) |
+
+### Concurrency
+- **Tailor:** up to 2 jobs in parallel (`maxConcurrentTailors`)
+- **Apply:** strictly one job at a time (requires focus on job tab)
+- **Pause:** freezes tailor + apply; queued jobs remain
+
+### Output folders (under onboarding output directory)
+```
+resume_tex/
+coverletter_tex/
+resume_pdf/
+coverletter_pdf/
+```
+
+Files are written via the File System Access API handle saved at onboarding. Re-select the output folder if write permission expires.
+
+### Assist apply (MVP)
+- **LinkedIn** and **Greenhouse** adapters prefill contact fields + AI free-text answers
+- Other platforms use a generic field matcher (capture + tailor always work)
+- AI answers are highlighted on-page; user reviews before submit
+- **No auto-submit** in Phase 1
+
+### Storage keys
+- `pipeline_queue_v1` — job queue (mirrored to `localHistory` for compatibility)
+- `pipeline_settings_v1` — `{ paused, maxConcurrentTailors, autoStartApply }`
+- IndexedDB `autoapplyai-fs` — persisted `outputDir` handle for artifact writes

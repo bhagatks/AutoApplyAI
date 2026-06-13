@@ -1,2 +1,30 @@
-node_modules
+# Dependencies
+node_modules/
+
+# Environment & secrets (never commit)
 .env
+.env.local
+.env.*.local
+!.env.example
+!.env.local.example
+
+# Build output — Vite embeds VITE_* from .env at build time
+dist/
+
+# Firebase deploy cache
+.firebase/
+
+# OS & IDE
+.DS_Store
+.idea/
+
+# Local user/runtime data (legacy or dev)
+config.json
+jobs.json
+resume_rules.json
+
+# Firebase Admin SDK & other credentials
+*firebase-adminsdk*.json
+google-credentials.json
+credentials.json
+*.pem

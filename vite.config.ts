@@ -1,9 +1,24 @@
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
+import tailwindcss from '@tailwindcss/vite';
 import { resolve } from 'path';
 
+function loginRedirectPlugin() {
+  return {
+    name: 'login-redirect',
+    configureServer(server: { middlewares: { use: (fn: (req: { url?: string }, res: unknown, next: () => void) => void) => void } }) {
+      server.middlewares.use((req, _res, next) => {
+        if (req.url === '/login' || req.url?.startsWith('/login?')) {
+          req.url = req.url.replace(/^\/login/, '/dashboard.html');
+        }
+        next();
+      });
+    },
+  };
+}
+
 export default defineConfig({
-  plugins: [react()],
+  plugins: [react(), loginRedirectPlugin(), tailwindcss()],
   server: {
     port: 3000,
     host: '0.0.0.0'
@@ -15,7 +30,8 @@ export default defineConfig({
     minify: false,
     rollupOptions: {
       input: {
-        dashboard: resolve(__dirname, 'index.html'),
+        landing: resolve(__dirname, 'index.html'),
+        dashboard: resolve(__dirname, 'dashboard.html'),
         sidepanel: resolve(__dirname, 'sidepanel.html'),
         background: resolve(__dirname, 'src/background/index.ts'),
         content: resolve(__dirname, 'src/content/index.ts'),

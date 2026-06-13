@@ -1,7 +1,30 @@
-import React from 'react';
 import ReactDOM from 'react-dom/client';
 import App from './App';
 import './style.css';
+import { initSentry } from '../shared/sentry';
+import { ErrorBoundary } from '@sentry/react';
+
+initSentry('sidepanel');
+
+document.documentElement.classList.add('sidepanel-root');
+document.body.classList.add('sidepanel-root');
+
+// Long-lived port — background detects disconnect when the sidepanel closes.
+if (typeof chrome !== 'undefined' && chrome.runtime?.connect) {
+  const sidepanelPort = chrome.runtime.connect({ name: 'autoapplyai-sidepanel' });
+
+  const announceReady = () => {
+    if (!chrome.tabs?.query) return;
+    chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
+      sidepanelPort.postMessage({
+        action: 'SIDEPANEL_READY',
+        tabId: tabs[0]?.id,
+      });
+    });
+  };
+
+  announceReady();
+}
 
 // Gracefully handle uncaught promise rejections, specifically Firebase offline/network errors
 window.addEventListener('unhandledrejection', (event) => {
@@ -20,8 +43,7 @@ window.addEventListener('unhandledrejection', (event) => {
 });
 
 ReactDOM.createRoot(document.getElementById('root')!).render(
-  <React.StrictMode>
+  <ErrorBoundary fallback={<p>Something went wrong. Reload the extension.</p>}>
     <App />
-  </React.StrictMode>
+  </ErrorBoundary>
 );
-

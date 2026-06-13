@@ -1,0 +1,42 @@
+/**
+ * AutoApplyAI brand tokens — Dark Professional (unified across landing, dashboard, sidepanel)
+ */
+:root {
+  --brand: #2563EB;
+  --brand-hover: #1D4ED8;
+  --brand-2: #3B82F6;
+  --brand-accent: #6366F1;
+  --brand-gradient: linear-gradient(135deg, #2563EB 0%, #3B82F6 100%);
+  --brand-gradient-soft: linear-gradient(135deg, rgba(37, 99, 235, 0.12), rgba(59, 130, 246, 0.06));
+
+  --brand-color: var(--brand);
+  --accent-color: var(--brand-2);
+
+  --bg-color: #0B1020;
+  --bg-color-2: #111827;
+  --bg-gradient: linear-gradient(180deg, #0B1020 0%, #111827 50%, #0B1020 100%);
+  --panel-bg: #172033;
+  --panel-bg-2: #1E293B;
+  --panel-border: #24324A;
+  --border-color: #24324A;
+  --panel-glow: 0 16px 48px rgba(0, 0, 0, 0.4);
+  --shadow-glow: 0 12px 30px rgba(37, 99, 235, 0.35);
+
+  --text-primary: #F8FAFC;
+  --text-secondary: #CBD5E1;
+  --text-muted: #94A3B8;
+
+  --success-color: #22C55E;
+  --warning-color: #F59E0B;
+  --danger-color: #EF4444;
+  --input-bg: #1E293B;
+  --input-border: #24324A;
+  --surface-hover: #24324A;
+
+  --card-radius: 12px;
+  --button-radius: 8px;
+  --transition-speed: 0.3s;
+
+  --font-title: 'Outfit', sans-serif;
+  --font-body: 'Inter', sans-serif;
+}

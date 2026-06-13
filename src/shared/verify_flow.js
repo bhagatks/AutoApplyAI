@@ -5,6 +5,7 @@ function isConfigComplete(config) {
   return !!(
     config &&
     config.customerId &&
+    config.aiProvider &&
     config.geminiApiKey &&
     config.outputDir &&
     config.candidateProfile &&
@@ -31,23 +32,25 @@ function runTests() {
   console.log("=== Running Flow & Onboarding Unit Tests ===");
 
   // Test 1: Generate customerId format correctly
-  const firstName = "Bhagath ";
-  const lastName = "Siddi  ";
+  const userId = "testuser123";
+  const firstName = "f_name ";
+  const lastName = "l_name  ";
   const cleanFirst = firstName.trim().toLowerCase().replace(/[^a-z0-9]/g, '');
   const cleanLast = lastName.trim().toLowerCase().replace(/[^a-z0-9]/g, '');
-  const customerId = `customer_${cleanFirst}_${cleanLast}`;
-  assert.strictEqual(customerId, "customer_bhagath_siddi", "CustomerId construction failed!");
+  const suffix = userId ? `_${userId.slice(0, 5)}` : '';
+  const customerId = `customer_${cleanFirst}_${cleanLast}${suffix}`;
+  assert.strictEqual(customerId, "customer_fname_lname_testu", "CustomerId construction failed!");
   console.log("✓ Test 1 Passed: customerId constructed correctly:", customerId);
 
   // Test 2: Incomplete config validation
   const incompleteConfig = {
-    customerId: "customer_bhagath_siddi",
+    customerId: "customer_fname_lname_testu",
     geminiApiKey: "AIzaSyTest",
     outputDir: "/Users/bstar/Downloads/resume_backup/",
     candidateProfile: {
-      firstName: "Bhagath",
-      lastName: "Siddi",
-      email: "bhagathsiddi@gmail.com",
+      firstName: "f_name",
+      lastName: "l_name",
+      email: "f_namel_name@gmail.com",
       phone: "" // Missing phone
     }
   };
@@ -56,13 +59,14 @@ function runTests() {
 
   // Test 3: Complete config validation
   const completeConfig = {
-    customerId: "customer_bhagath_siddi",
+    customerId: "customer_fname_lname_testu",
+    aiProvider: "gemini",
     geminiApiKey: "AIzaSyTest",
     outputDir: "/Users/bstar/Downloads/resume_backup/",
     candidateProfile: {
-      firstName: "Bhagath",
-      lastName: "Siddi",
-      email: "bhagathsiddi@gmail.com",
+      firstName: "f_name",
+      lastName: "l_name",
+      email: "f_namel_name@gmail.com",
       phone: "555-555-5555",
       resume: "xxx.pdf"
     }
@@ -76,7 +80,7 @@ function runTests() {
   console.log("✓ Test 4 Passed: Unauthenticated state redirects to Login.");
 
   // Test 5: Flow state resolution - Logged in, not onboarded
-  const currentUserMock = { uid: "user123", email: "bhagathsiddi@gmail.com" };
+  const currentUserMock = { uid: "user123", email: "f_namel_name@gmail.com" };
   const stateOnboarding = resolveFlowState(currentUserMock, incompleteConfig);
   assert.strictEqual(stateOnboarding, 'SHOW_ONBOARDING', "Onboarding check failed: Expected SHOW_ONBOARDING");
   console.log("✓ Test 5 Passed: Authenticated but incomplete configuration blocks and shows Onboarding.");
