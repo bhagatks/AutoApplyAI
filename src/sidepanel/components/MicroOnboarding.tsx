@@ -28,6 +28,7 @@ import {
   buildParsedResumeFromForm,
   isParsedResumeComplete,
   parsedResumeToBaseProfile,
+  resetParsedResumeForm,
 } from '../../shared/resume-types';
 import ResumeProfileSections from './ResumeProfileSections';
 import {
@@ -88,6 +89,9 @@ export default function MicroOnboarding({ userId, onComplete, onSignOut, initial
   );
   const [resumeContext, setResumeContext] = useState(() =>
     initialConfig?.resumeContext || ''
+  );
+  const [useAiParsing, setUseAiParsing] = useState(() =>
+    initialConfig?.useAiParsing ?? true
   );
   const [resumeFile, setResumeFile] = useState<string>(() => 
     initialConfig?.candidateProfile?.resume || ''
@@ -262,6 +266,7 @@ export default function MicroOnboarding({ userId, onComplete, onSignOut, initial
       setGeminiApiKey(initialConfig.geminiApiKey || '');
       setOutputDir(initialConfig.outputDir || '');
       setResumeContext(initialConfig.resumeContext || '');
+      setUseAiParsing(initialConfig.useAiParsing ?? true);
       setIsKeyVerified(!!initialConfig.geminiApiKey);
     } else if (initialProfile) {
       if (initialProfile.firstName) setFirstName(initialProfile.firstName);
@@ -283,6 +288,7 @@ export default function MicroOnboarding({ userId, onComplete, onSignOut, initial
                 setGeminiApiKey(config.geminiApiKey || '');
                 setOutputDir(config.outputDir || '');
                 setResumeContext(config.resumeContext || '');
+                setUseAiParsing(config.useAiParsing ?? true);
                 setIsKeyVerified(!!config.geminiApiKey);
                 if (config.candidateProfile) {
                   setFirstName(config.candidateProfile.firstName || '');
@@ -312,6 +318,7 @@ export default function MicroOnboarding({ userId, onComplete, onSignOut, initial
               setGeminiApiKey(config.geminiApiKey || '');
               setOutputDir(config.outputDir || '');
               setResumeContext(config.resumeContext || '');
+              setUseAiParsing(config.useAiParsing ?? true);
               setIsKeyVerified(!!config.geminiApiKey);
               if (config.candidateProfile) {
                 setFirstName(config.candidateProfile.firstName || '');
@@ -387,6 +394,35 @@ export default function MicroOnboarding({ userId, onComplete, onSignOut, initial
     });
   };
 
+  const clearScanFormFields = () => {
+    resetParsedResumeForm({
+      setFirstName,
+      setLastName,
+      setEmail,
+      setPhone,
+      setCity,
+      setState: setStateVal,
+      setCountry,
+      setPostalCode,
+      setRole,
+      setSummary,
+      setCompetencies,
+      setSkills,
+      setExperience,
+      setEducation,
+      setCurrentCompany,
+      setCurrentlyWorking,
+      setLinkedin,
+      setGithub,
+      setPortfolio,
+      setWebsite,
+      setOtherLinks,
+      setLanguages,
+      setWorkAuthorizationUS,
+      setRequiresSponsorship,
+    });
+  };
+
   const pickOutputDirectory = async () => {
     try {
       const handle = await (window as any).showDirectoryPicker();
@@ -421,6 +457,7 @@ export default function MicroOnboarding({ userId, onComplete, onSignOut, initial
 
       setUploadedFile(file);
       setResumeFile(file.name);
+      clearScanFormFields();
       scanAbortControllerRef.current?.abort();
       scanCancelRef.current = false;
       scanAbortControllerRef.current = new AbortController();
@@ -459,7 +496,7 @@ export default function MicroOnboarding({ userId, onComplete, onSignOut, initial
           throw new Error('No readable text found in the document.');
         }
 
-        setScanStatus('Structuring profile with AI...');
+        setScanStatus(useAiParsing ? 'Structuring profile with AI...' : 'Extracting profile from resume text...');
         const scanResult = await parseResumeWithAI(
           aiProvider,
           geminiApiKey.trim(),
@@ -468,7 +505,8 @@ export default function MicroOnboarding({ userId, onComplete, onSignOut, initial
           file.name,
           setScanStatus,
           scanSignal,
-          extraction.warnings
+          extraction.warnings,
+          { useAiParsing }
         );
         throwIfScanCancelled();
         const parsed = scanResult.resume;
@@ -571,6 +609,7 @@ export default function MicroOnboarding({ userId, onComplete, onSignOut, initial
         scanCancelRef.current = false;
         scanAbortControllerRef.current = null;
         setIsScanningResume(false);
+        e.target.value = '';
       }
     }
   };
@@ -626,6 +665,7 @@ export default function MicroOnboarding({ userId, onComplete, onSignOut, initial
       customerId,
       aiProvider,
       aiModel: activeModel,
+      useAiParsing,
       geminiApiKey: geminiApiKey.trim(),
       outputDir: outputDir.trim(),
       resumeContext: resumeContext.trim() || undefined,
@@ -1155,6 +1195,36 @@ export default function MicroOnboarding({ userId, onComplete, onSignOut, initial
             <label style={fieldLabelStyle(invalidFields, 'resumeFile', { display: 'flex', alignItems: 'center', gap: 6, fontSize: '0.78rem', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: 6 })}>
               <FileText size={12} style={{ color: 'var(--brand-color)' }} /> Resume Document (PDF / DOCX) *
             </label>
+
+            <label
+              style={{
+                display: 'flex',
+                alignItems: 'flex-start',
+                gap: 10,
+                marginBottom: 10,
+                padding: '10px 12px',
+                borderRadius: 8,
+                border: '1px solid var(--panel-border)',
+                background: 'var(--panel-bg)',
+                cursor: isKeyVerified && outputDir.trim() && !isScanningResume ? 'pointer' : 'not-allowed',
+                opacity: isKeyVerified && outputDir.trim() ? 1 : 0.6,
+              }}
+            >
+              <input
+                type="checkbox"
+                checked={useAiParsing}
+                disabled={!isKeyVerified || !outputDir.trim() || isScanningResume}
+                onChange={(e) => setUseAiParsing(e.target.checked)}
+                style={{ marginTop: 2, accentColor: 'var(--brand-color)' }}
+              />
+              <span style={{ fontSize: '0.78rem', color: 'var(--text-secondary)', lineHeight: 1.45 }}>
+                <strong style={{ color: 'var(--text-primary)' }}>Use AI to parse resume</strong>
+                <span style={{ display: 'block', marginTop: 2, color: 'var(--text-muted)', fontSize: '0.72rem' }}>
+                  On by default — sends your resume to AI for full structured extraction. Turn off to detect only basic contact fields and fill the rest manually.
+                </span>
+              </span>
+            </label>
+
             <div
               className={`upload-dropzone${invalidFields?.has('resumeFile') || invalidFields?.has('resumeScan') ? ' field-invalid' : ''}`}
               data-field-key={invalidFields?.has('resumeScan') ? 'resumeScan' : 'resumeFile'}

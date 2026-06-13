@@ -1,6 +1,14 @@
 # AutoApplyAI Bot
 
-An automated resume tailoring system powered by Python/FastAPI, Google Gemini API, and Tectonic LaTeX typesetting. It enables 1-click tailored resume generation and PDF compilation directly from job listings (LinkedIn, Indeed) via a Chrome Extension and an elegant glassmorphic dashboard.
+Chrome extension (MV3) + Firebase-hosted web dashboard for AI-powered resume tailoring on job listings (LinkedIn, Indeed, Greenhouse, Workday, and more). TypeScript, React, Vite, Tailwind; shared logic in `src/shared/`.
+
+**Current docs:** [docs/ARCHITECTURE.md](./docs/ARCHITECTURE.md) (high-level overview), [FLOW.md](./FLOW.md) (auth/onboarding), [RESUME_SPEC.md](./RESUME_SPEC.md) (resume engine). The long sections below describe a **legacy Python/FastAPI + Tectonic** stack that is no longer in this repository.
+
+---
+
+## Legacy documentation (Python server — removed)
+
+The following sections are kept for historical reference only.
 
 ---
 

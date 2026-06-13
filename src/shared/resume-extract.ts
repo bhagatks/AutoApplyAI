@@ -30,34 +30,54 @@ function layoutPdfPageText(items: PdfTextItem[]): string {
       hasEOL: Boolean(item.hasEOL),
     }));
 
-  positioned.sort((a, b) => {
-    const yDiff = b.y - a.y;
-    if (Math.abs(yDiff) > 4) return yDiff;
-    return a.x - b.x;
-  });
+  if (!positioned.length) return '';
 
-  const lines: string[] = [];
-  let currentLine = '';
-  let lastY: number | null = null;
+  const xs = positioned.map((p) => p.x);
+  const minX = Math.min(...xs);
+  const maxX = Math.max(...xs);
+  const pageWidth = maxX - minX;
+  const midX = minX + pageWidth / 2;
 
-  for (const item of positioned) {
-    if (lastY !== null && Math.abs(item.y - lastY) > 4) {
-      if (currentLine.trim()) lines.push(currentLine.trim());
-      currentLine = item.str;
-    } else {
-      currentLine = currentLine ? `${currentLine} ${item.str}` : item.str;
+  // Two-column layout: process left column top-to-bottom, then right column.
+  const useColumns = pageWidth > 200 && positioned.some((p) => p.x < midX - 20) && positioned.some((p) => p.x > midX + 20);
+
+  const columns: typeof positioned[] = useColumns
+    ? [positioned.filter((p) => p.x < midX), positioned.filter((p) => p.x >= midX)]
+    : [positioned];
+
+  const columnTexts: string[] = [];
+  for (const column of columns) {
+    column.sort((a, b) => {
+      const yDiff = b.y - a.y;
+      if (Math.abs(yDiff) > 4) return yDiff;
+      return a.x - b.x;
+    });
+
+    const lines: string[] = [];
+    let currentLine = '';
+    let lastY: number | null = null;
+
+    for (const item of column) {
+      if (lastY !== null && Math.abs(item.y - lastY) > 4) {
+        if (currentLine.trim()) lines.push(currentLine.trim());
+        currentLine = item.str;
+      } else {
+        currentLine = currentLine ? `${currentLine} ${item.str}` : item.str;
+      }
+      lastY = item.y;
+
+      if (item.hasEOL) {
+        if (currentLine.trim()) lines.push(currentLine.trim());
+        currentLine = '';
+        lastY = null;
+      }
     }
-    lastY = item.y;
 
-    if (item.hasEOL) {
-      if (currentLine.trim()) lines.push(currentLine.trim());
-      currentLine = '';
-      lastY = null;
-    }
+    if (currentLine.trim()) lines.push(currentLine.trim());
+    columnTexts.push(lines.join('\n'));
   }
 
-  if (currentLine.trim()) lines.push(currentLine.trim());
-  return lines.join('\n');
+  return columnTexts.filter(Boolean).join('\n\n');
 }
 
 export interface PdfExtractionResult {

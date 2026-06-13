@@ -7,6 +7,7 @@ import {
   getProviderLabel as getProviderLabelFromErrors,
   formatGrokAccessDeniedError,
 } from './ai-errors';
+import { enqueueGeminiRequest, notifyGeminiRateLimited } from './ai-request-queue';
 
 export type AiProvider = 'gemini' | 'openai' | 'anthropic' | 'grok';
 
@@ -335,27 +336,32 @@ async function runStreamingGeminiCallOnce(
   promptText: string,
   onProgress?: (rawText: string) => void,
   model?: string,
-  systemInstruction: string = SYSTEM_INSTRUCTION
+  systemInstruction: string = SYSTEM_INSTRUCTION,
+  signal?: AbortSignal
 ): Promise<any> {
-  const geminiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${model || DEFAULT_PROVIDER_MODELS.gemini[0]}:streamGenerateContent?alt=sse&key=${geminiKeyParam(apiKey)}`;
+  return enqueueGeminiRequest(async (queuedSignal) => {
+    throwIfScanAborted(signal ?? queuedSignal);
+    const geminiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${model || DEFAULT_PROVIDER_MODELS.gemini[0]}:streamGenerateContent?alt=sse&key=${geminiKeyParam(apiKey)}`;
 
-  const response = await fetchWithTimeout(geminiUrl, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      contents: [{ parts: [{ text: promptText }] }],
-      systemInstruction: { parts: [{ text: systemInstruction }] },
-      generationConfig: {
-        responseMimeType: "application/json",
-        responseSchema: responseSchema
-      }
-    })
-  });
+    const response = await fetchWithTimeout(geminiUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      signal: signal ?? queuedSignal,
+      body: JSON.stringify({
+        contents: [{ parts: [{ text: promptText }] }],
+        systemInstruction: { parts: [{ text: systemInstruction }] },
+        generationConfig: {
+          responseMimeType: "application/json",
+          responseSchema: responseSchema
+        }
+      })
+    });
 
-  if (!response.ok) {
-    const errText = await response.text();
-    throw createAiHttpError(formatProviderApiError('gemini', response.status, errText), response.status, errText);
-  }
+    if (!response.ok) {
+      const errText = await response.text();
+      if (response.status === 429) notifyGeminiRateLimited();
+      throw createAiHttpError(formatProviderApiError('gemini', response.status, errText), response.status, errText);
+    }
 
   const reader = response.body?.getReader();
   const decoder = new TextDecoder('utf-8');
@@ -390,12 +396,13 @@ async function runStreamingGeminiCallOnce(
     }
   }
 
-  try {
-    return JSON.parse(fullText);
-  } catch (err) {
-    console.error("Failed to parse final JSON string:", fullText);
-    throw new Error("Gemini returned invalid or truncated JSON response.");
-  }
+    try {
+      return JSON.parse(fullText);
+    } catch (err) {
+      console.error("Failed to parse final JSON string:", fullText);
+      throw new Error("Gemini returned invalid or truncated JSON response.");
+    }
+  }, signal);
 }
 
 async function runStreamingGeminiCall(
@@ -421,7 +428,8 @@ async function runStreamingGeminiCall(
           promptText,
           onProgress,
           candidateModel,
-          systemInstruction
+          systemInstruction,
+          undefined
         );
       } catch (err: unknown) {
         lastError = err instanceof Error ? err : new Error(String(err));
@@ -429,6 +437,7 @@ async function runStreamingGeminiCall(
         const status = loose.status ?? 0;
         const body = loose.body ?? lastError.message;
 
+        if (status === 429) notifyGeminiRateLimited(8_000 * (attempt + 1));
         if (shouldTryNextGeminiModel(status, body)) break;
         if (!isRetryableGeminiError(status, body)) throw lastError;
       }
@@ -908,7 +917,7 @@ export async function verifyProviderApiKey(
   return { valid: false, error: `Unsupported provider: ${provider}` };
 }
 
-import { PARSED_RESUME_JSON_SCHEMA, PARSED_RESUME_GEMINI_SCHEMA, PARSED_RESUME_SECTIONS_GEMINI_SCHEMA, ParsedResume, ResumeParseQuality, emptyParsedResume, formatExperienceForPrompt, formatEducationForPrompt, normalizeEducationEntry, educationFromLegacyHighestDegree, deriveHighestDegree, assessParsedResumeQuality, mergeParsedResume } from './resume-types';
+import { PARSED_RESUME_JSON_SCHEMA, PARSED_RESUME_GEMINI_SCHEMA, ParsedResume, ResumeParseQuality, emptyParsedResume, formatExperienceForPrompt, formatEducationForPrompt, normalizeEducationEntry, educationFromLegacyHighestDegree, deriveHighestDegree, assessParsedResumeQuality, mergeParsedResume } from './resume-types';
 import {
   buildLayoutPromptSection,
   buildResumeContextPromptSection,
@@ -917,6 +926,11 @@ import {
 } from './resume-builder-config';
 
 export type { ResumeParseQuality } from './resume-types';
+
+export interface ResumeParseOptions {
+  /** When true (default), use AI to structure the resume. When false, only basic contact regex + manual entry. */
+  useAiParsing?: boolean;
+}
 
 export interface ResumeScanResult {
   resume: ParsedResume;
@@ -1185,28 +1199,124 @@ async function geminiGenerateJson(
   signal?: AbortSignal,
   responseSchema?: unknown
 ): Promise<string> {
-  throwIfScanAborted(signal);
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${geminiKeyParam(apiKey)}`;
-  const res = await fetchWithTimeout(url, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    signal,
-    body: JSON.stringify({
-      contents: [{ parts: [{ text: promptText }] }],
-      systemInstruction: { parts: [{ text: systemPrompt }] },
-      generationConfig: {
-        responseMimeType: 'application/json',
-        maxOutputTokens: 16384,
-        ...(responseSchema ? { responseSchema } : {}),
-      },
-    }),
-  });
-  if (!res.ok) {
-    const body = await res.text();
-    throw createAiHttpError(formatProviderApiError('gemini', res.status, body), res.status, body);
+  return enqueueGeminiRequest(async (queuedSignal) => {
+    throwIfScanAborted(signal ?? queuedSignal);
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${geminiKeyParam(apiKey)}`;
+    const res = await fetchWithTimeout(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      signal: signal ?? queuedSignal,
+      body: JSON.stringify({
+        contents: [{ parts: [{ text: promptText }] }],
+        systemInstruction: { parts: [{ text: systemPrompt }] },
+        generationConfig: {
+          responseMimeType: 'application/json',
+          maxOutputTokens: 16384,
+          ...(responseSchema ? { responseSchema } : {}),
+        },
+      }),
+    });
+    if (!res.ok) {
+      const body = await res.text();
+      if (res.status === 429) notifyGeminiRateLimited();
+      throw createAiHttpError(formatProviderApiError('gemini', res.status, body), res.status, body);
+    }
+    const json = await res.json();
+    const candidate = json.candidates?.[0];
+    if (candidate?.finishReason === 'MAX_TOKENS') {
+      throw new SyntaxError('Gemini response truncated (MAX_TOKENS).');
+    }
+    return candidate?.content?.parts?.[0]?.text || '{}';
+  }, signal);
+}
+
+const BASIC_CONTACT_EMAIL_RE = /\b[\w.+-]+@[\w.-]+\.[A-Za-z]{2,}\b/;
+const BASIC_CONTACT_PHONE_RE =
+  /(?:\+?\d{1,3}[-.\s]?)?(?:\(\d{3}\)|\d{3})[-.\s]?\d{3}[-.\s]?\d{4}\b|\+\d{10,15}\b/;
+const BASIC_CONTACT_LINKEDIN_RE = /(?:https?:\/\/)?(?:www\.)?linkedin\.com\/in\/[\w-]+/i;
+
+function extractBasicContactFromText(text: string): Partial<ParsedResume> {
+  const result: Partial<ParsedResume> = {};
+  const header = text.split('\n').slice(0, 12).join('\n');
+
+  const email = header.match(BASIC_CONTACT_EMAIL_RE)?.[0] || text.match(BASIC_CONTACT_EMAIL_RE)?.[0];
+  if (email) result.email = email.toLowerCase();
+
+  const phone = header.match(BASIC_CONTACT_PHONE_RE)?.[0] || text.match(BASIC_CONTACT_PHONE_RE)?.[0];
+  if (phone) result.phone = phone.trim();
+
+  const linkedin = header.match(BASIC_CONTACT_LINKEDIN_RE)?.[0] || text.match(BASIC_CONTACT_LINKEDIN_RE)?.[0];
+  if (linkedin) {
+    result.linkedin = /^https?:\/\//i.test(linkedin) ? linkedin : `https://${linkedin}`;
   }
-  const json = await res.json();
-  return json.candidates?.[0]?.content?.parts?.[0]?.text || '{}';
+
+  return result;
+}
+
+function parseResumeWithoutAi(extractedText: string, sourceFileName: string): ParsedResume {
+  return normalizeParsedResume(extractBasicContactFromText(extractedText), sourceFileName);
+}
+
+const RESUME_PARSE_SYSTEM_PROMPT = `You are an expert resume parser for ATS systems. Extract ALL available structured data from the resume text. Output ONLY a raw JSON object matching this schema exactly. Use empty strings for missing scalar fields and empty arrays when none found. For experience, include every job listed with bullet achievements. For education, include every degree, professional certification, license, bootcamp, and training credential as separate entries with the appropriate credentialType. For skills, extract every language, framework, database, cloud platform, tool, and methodology from the Skills/Technical Skills section as separate strings in the skills array (not competencies).
+
+CRITICAL: You MUST include "experience" and "skills" arrays even if sparse. Escape quotes inside strings. No markdown fences.
+Schema:
+${PARSED_RESUME_JSON_SCHEMA}`;
+
+const RESUME_SECTIONS_SYSTEM_PROMPT = `You are an expert resume parser. Extract work experience, education, skills, competencies, role, and summary from the resume text.
+
+Rules:
+- Include EVERY job in experience with achievement bullets when present.
+- Put each technical skill as a separate string in skills (languages, frameworks, cloud, tools).
+- Use empty arrays only if the section truly does not exist in the source text.
+- Do not invent employers, dates, or credentials.`;
+
+function buildResumeEnrichmentPrompt(extractedText: string, partial: ParsedResume): string {
+  return `The prior parse missed work history and/or skills. Re-read the full resume and return a complete JSON object using the same schema. Preserve contact fields already extracted when still correct.
+
+Already extracted contact/profile:
+${JSON.stringify(
+  {
+    firstName: partial.firstName,
+    lastName: partial.lastName,
+    email: partial.email,
+    phone: partial.phone,
+    city: partial.city,
+    state: partial.state,
+    country: partial.country,
+    role: partial.role,
+    summary: partial.summary,
+  },
+  null,
+  2
+)}
+
+Resume text:
+"""
+${extractedText.slice(0, 28000)}
+"""`;
+}
+
+async function retryResumeEnrichmentWithGemini(
+  apiKey: string,
+  model: string | undefined,
+  extractedText: string,
+  partial: ParsedResume,
+  onStatus?: (message: string) => void,
+  signal?: AbortSignal
+): Promise<ParsedResume> {
+  onStatus?.('Extracting work history and skills...');
+  const preferred = model || DEFAULT_PROVIDER_MODELS.gemini[0];
+  const text = await geminiGenerateJson(
+    apiKey,
+    preferred,
+    RESUME_PARSE_SYSTEM_PROMPT,
+    buildResumeEnrichmentPrompt(extractedText, partial),
+    signal,
+    PARSED_RESUME_GEMINI_SCHEMA
+  );
+  const patch = parseAiJsonObject(text) as Partial<ParsedResume>;
+  return mergeParsedResume(partial, patch);
 }
 
 async function parseResumeWithGemini(
@@ -1215,6 +1325,7 @@ async function parseResumeWithGemini(
   sourceFileName: string,
   systemPrompt: string,
   promptText: string,
+  extractedText: string,
   onStatus?: (message: string) => void,
   signal?: AbortSignal
 ): Promise<ParsedResume> {
@@ -1243,7 +1354,23 @@ async function parseResumeWithGemini(
           PARSED_RESUME_GEMINI_SCHEMA
         );
         try {
-          return parseResumeJson(text, sourceFileName);
+          let resume = parseResumeJson(text, sourceFileName);
+          const assessment = assessParsedResumeQuality(resume, extractedText);
+          if (assessment.needsEnrichment) {
+            try {
+              resume = await retryResumeEnrichmentWithGemini(
+                apiKey,
+                candidateModel,
+                extractedText,
+                resume,
+                onStatus,
+                signal
+              );
+            } catch (enrichErr) {
+              console.warn('Resume enrichment retry failed:', enrichErr);
+            }
+          }
+          return resume;
         } catch (parseErr) {
           if (isScanCancelledError(parseErr)) throw parseErr;
           lastError = parseErr instanceof Error ? parseErr : new Error(String(parseErr));
@@ -1260,6 +1387,7 @@ async function parseResumeWithGemini(
         const status = err?.status ?? 0;
         const body = err?.body ?? lastError.message;
 
+        if (status === 429) notifyGeminiRateLimited(8_000 * (attempt + 1));
         if (shouldTryNextGeminiModel(status, body)) break;
         if (!isRetryableGeminiError(status, body)) throw lastError;
       }
@@ -1267,37 +1395,6 @@ async function parseResumeWithGemini(
   }
 
   throw lastError || new Error('Resume scan returned unreadable JSON. Try again or enter details manually.');
-}
-
-const RESUME_SECTIONS_SYSTEM_PROMPT = `You are an expert resume parser. Extract work experience, education, skills, competencies, role, and summary from the resume text.
-
-Rules:
-- Include EVERY job in experience with achievement bullets when present.
-- Put each technical skill as a separate string in skills (languages, frameworks, cloud, tools).
-- Use empty arrays only if the section truly does not exist in the source text.
-- Do not invent employers, dates, or credentials.`;
-
-async function enrichResumeSectionsWithGemini(
-  apiKey: string,
-  model: string | undefined,
-  extractedText: string,
-  signal?: AbortSignal
-): Promise<Partial<ParsedResume>> {
-  const preferred = model || DEFAULT_PROVIDER_MODELS.gemini[0];
-  const promptText = `Extract structured work history, education, skills, and competencies from this resume:
-"""
-${extractedText.slice(0, 28000)}
-"""`;
-
-  const text = await geminiGenerateJson(
-    apiKey,
-    preferred,
-    RESUME_SECTIONS_SYSTEM_PROMPT,
-    promptText,
-    signal,
-    PARSED_RESUME_SECTIONS_GEMINI_SCHEMA
-  );
-  return parseAiJsonObject(text) as Partial<ParsedResume>;
 }
 
 async function enrichResumeSectionsWithProvider(
@@ -1335,19 +1432,27 @@ async function finalizeResumeScan(
   apiKey: string,
   model: string | undefined,
   onStatus?: (message: string) => void,
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  useAiParsing = true
 ): Promise<ResumeScanResult> {
   const warnings = [...extractionWarnings];
   let merged = resume;
   let assessment = assessParsedResumeQuality(merged, extractedText);
 
-  if (assessment.needsEnrichment) {
+  if (!useAiParsing) {
+    warnings.push(
+      'AI parsing is off — only basic contact fields were detected. Fill in experience, skills, and education manually, or enable "Use AI to parse resume".'
+    );
+    for (const warning of assessment.warnings) {
+      if (!warnings.includes(warning)) warnings.push(warning);
+    }
+    return { resume: merged, warnings, quality: assessment.quality };
+  }
+
+  if (assessment.needsEnrichment && provider !== 'gemini') {
     onStatus?.('Extracting work history and skills...');
     try {
-      const patch =
-        provider === 'gemini'
-          ? await enrichResumeSectionsWithGemini(apiKey, model, extractedText, signal)
-          : await enrichResumeSectionsWithProvider(provider, apiKey, model, extractedText, signal);
+      const patch = await enrichResumeSectionsWithProvider(provider, apiKey, model, extractedText, signal);
       merged = mergeParsedResume(merged, patch);
       assessment = assessParsedResumeQuality(merged, extractedText);
     } catch (err) {
@@ -1372,19 +1477,36 @@ export async function parseResumeWithAI(
   sourceFileName = 'resume.pdf',
   onStatus?: (message: string) => void,
   signal?: AbortSignal,
-  extractionWarnings: string[] = []
+  extractionWarnings: string[] = [],
+  options: ResumeParseOptions = {}
 ): Promise<ResumeScanResult> {
+  const useAiParsing = options.useAiParsing ?? true;
   throwIfScanAborted(signal);
-  const systemPrompt = `You are an expert resume parser for ATS systems. Extract ALL available structured data from the resume text. Output ONLY a raw JSON object matching this schema exactly. Use empty strings for missing scalar fields and empty arrays when none found. For experience, include every job listed with bullet achievements. For education, include every degree, professional certification, license, bootcamp, and training credential as separate entries with the appropriate credentialType. For skills, extract every language, framework, database, cloud platform, tool, and methodology from the Skills/Technical Skills section as separate strings in the skills array (not competencies).
 
-CRITICAL: You MUST include "experience" and "skills" arrays even if sparse. Escape quotes inside strings. No markdown fences.
-Schema:
-${PARSED_RESUME_JSON_SCHEMA}`;
+  if (!useAiParsing) {
+    onStatus?.('Detecting contact fields from resume text...');
+    const resume = parseResumeWithoutAi(extractedText, sourceFileName);
+    return finalizeResumeScan(
+      resume,
+      extractedText,
+      extractionWarnings,
+      provider,
+      apiKey,
+      model,
+      onStatus,
+      signal,
+      false
+    );
+  }
+
+  const systemPrompt = RESUME_PARSE_SYSTEM_PROMPT;
 
   const promptText = `Parse this resume and extract structured profile data:
 """
 ${extractedText.slice(0, 28000)}
 """`;
+
+  onStatus?.('Structuring profile with AI...');
 
   if (provider === 'gemini') {
     const resume = await parseResumeWithGemini(
@@ -1393,6 +1515,7 @@ ${extractedText.slice(0, 28000)}
       sourceFileName,
       systemPrompt,
       promptText,
+      extractedText,
       onStatus,
       signal
     );
@@ -1404,7 +1527,8 @@ ${extractedText.slice(0, 28000)}
       apiKey,
       model,
       onStatus,
-      signal
+      signal,
+      true
     );
   }
 
@@ -1441,7 +1565,8 @@ ${extractedText.slice(0, 28000)}
       apiKey,
       model,
       onStatus,
-      signal
+      signal,
+      true
     );
   }
 
@@ -1478,7 +1603,8 @@ ${extractedText.slice(0, 28000)}
       apiKey,
       model,
       onStatus,
-      signal
+      signal,
+      true
     );
   }
 
@@ -1522,7 +1648,8 @@ ${extractedText.slice(0, 28000)}
       apiKey,
       model,
       onStatus,
-      signal
+      signal,
+      true
     );
   }
 

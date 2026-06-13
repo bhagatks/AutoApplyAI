@@ -182,7 +182,7 @@ export interface PipelineSettings {
 
 export const DEFAULT_PIPELINE_SETTINGS: PipelineSettings = {
   paused: false,
-  maxConcurrentTailors: 2,
+  maxConcurrentTailors: 1,
   autoStartApply: true,
 };
 
@@ -200,6 +200,8 @@ export interface CustomerConfig {
   customerId: string;
   aiProvider: 'gemini' | 'openai' | 'anthropic' | 'grok';
   aiModel?: string;
+  /** When true, resume upload uses AI to structure profile data. Default is AI parsing. */
+  useAiParsing?: boolean;
   geminiApiKey: string;
   outputDir: string;
   candidateProfile: {

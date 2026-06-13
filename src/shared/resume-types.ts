@@ -1,3 +1,5 @@
+import { sanitizeResumeDate } from './resume-dates';
+
 export interface WorkExperience {
   jobTitle: string;
   company: string;
@@ -356,7 +358,7 @@ export function mergeParsedResume(base: ParsedResume, patch: Partial<ParsedResum
   const education =
     patch.education?.length &&
     patch.education.some((entry) => entry.degree.trim() || entry.school.trim())
-      ? patch.education.map((entry) => normalizeEducationEntry(entry))
+      ? dedupeEducationEntries(patch.education.map((entry) => normalizeEducationEntry(entry)))
       : base.education;
 
   return {
@@ -371,7 +373,12 @@ export function mergeParsedResume(base: ParsedResume, patch: Partial<ParsedResum
       patch.skills?.length && patch.skills.some((s) => s.trim()) ? patch.skills.filter(Boolean) : base.skills,
     experience,
     education,
-    currentCompany: patch.currentCompany?.trim() || base.currentCompany || experience[0]?.company || '',
+    currentCompany:
+      patch.currentCompany?.trim() ||
+      base.currentCompany ||
+      experience.find((job) => /^present$/i.test(job.endDate || ''))?.company ||
+      experience[0]?.company ||
+      '',
     currentlyWorking:
       typeof patch.currentlyWorking === 'boolean' ? patch.currentlyWorking : base.currentlyWorking,
     highestDegree: patch.highestDegree?.trim() || deriveHighestDegree(education),
@@ -402,10 +409,35 @@ export function normalizeEducationEntry(entry: Partial<EducationEntry>): Educati
     fieldOfStudy: entry.fieldOfStudy?.trim() || '',
     school: entry.school?.trim() || '',
     location: entry.location?.trim() || '',
-    startDate: entry.startDate?.trim() || '',
-    endDate: entry.endDate?.trim() || '',
+    startDate: sanitizeResumeDate(entry.startDate),
+    endDate: sanitizeResumeDate(entry.endDate),
     honors: entry.honors?.trim() || '',
   };
+}
+
+export function dedupeEducationEntries(entries: EducationEntry[]): EducationEntry[] {
+  const seen = new Set<string>();
+  const result: EducationEntry[] = [];
+
+  for (const entry of entries) {
+    const normalized = normalizeEducationEntry(entry);
+    if (!normalized.degree.trim() && !normalized.school.trim()) continue;
+
+    const key = [
+      normalized.credentialType,
+      normalized.school.trim().toLowerCase(),
+      normalized.degree.trim().toLowerCase(),
+      normalized.fieldOfStudy.trim().toLowerCase(),
+      normalized.endDate,
+      normalized.startDate,
+    ].join('|');
+
+    if (seen.has(key)) continue;
+    seen.add(key);
+    result.push(normalized);
+  }
+
+  return result;
 }
 
 /** Parse legacy single-line education into structured entries. */
@@ -637,6 +669,37 @@ export function applyParsedResumeToForm(
   if (parsed.languages?.length) setters.setLanguages(parsed.languages.join(', '));
   if (parsed.workAuthorizationUS) setters.setWorkAuthorizationUS(parsed.workAuthorizationUS);
   if (parsed.requiresSponsorship) setters.setRequiresSponsorship(parsed.requiresSponsorship);
+}
+
+/** Reset all scan-derived form fields before loading a new resume parse. */
+export function resetParsedResumeForm(
+  setters: Parameters<typeof applyParsedResumeToForm>[1]
+): void {
+  const empty = emptyParsedResume();
+  setters.setFirstName(empty.firstName);
+  setters.setLastName(empty.lastName);
+  setters.setEmail(empty.email);
+  setters.setPhone(empty.phone);
+  setters.setCity(empty.city);
+  setters.setState(empty.state);
+  setters.setCountry(empty.country);
+  setters.setPostalCode('');
+  setters.setRole(empty.role);
+  setters.setSummary(empty.summary);
+  setters.setCompetencies(['']);
+  setters.setSkills([]);
+  setters.setExperience(empty.experience);
+  setters.setEducation(empty.education);
+  setters.setCurrentCompany(empty.currentCompany);
+  setters.setCurrentlyWorking(empty.currentlyWorking);
+  setters.setLinkedin('');
+  setters.setGithub('');
+  setters.setPortfolio('');
+  setters.setWebsite('');
+  setters.setOtherLinks('');
+  setters.setLanguages('');
+  setters.setWorkAuthorizationUS('');
+  setters.setRequiresSponsorship('');
 }
 
 export function isCustomerConfigComplete(config: {

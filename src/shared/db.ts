@@ -34,20 +34,52 @@ import {
 import { stripUndefinedForFirestore } from './utils';
 
 const PERMISSION_DENIED_CODE = 'permission-denied';
+const FIRESTORE_AUTH_RETRY_DELAYS_MS = [400, 1200, 2500];
 
-async function ensureFirestoreAuth(userId: string): Promise<boolean> {
+function isTransientAuthError(err: unknown): boolean {
+  const code = (err as { code?: string })?.code ?? '';
+  const message = String((err as { message?: string })?.message ?? err ?? '');
+  return (
+    code === 'auth/network-request-failed' ||
+    code === 'auth/internal-error' ||
+    message.includes('service-is-currently-unavailable') ||
+    message.includes('503') ||
+    message.includes('network')
+  );
+}
+
+function sleepMs(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function ensureFirestoreAuth(userId: string, forceRefresh = false): Promise<boolean> {
   if (!auth?.currentUser) return false;
   if (auth.currentUser.uid !== userId) {
     console.warn('Firestore auth UID mismatch. Expected', userId, 'but got', auth.currentUser.uid);
     return false;
   }
-  try {
-    await auth.currentUser.getIdToken(true);
-    return true;
-  } catch (err) {
-    console.warn('Failed to refresh Firebase auth token before Firestore access:', err);
-    return false;
+
+  for (let attempt = 0; attempt < FIRESTORE_AUTH_RETRY_DELAYS_MS.length; attempt++) {
+    try {
+      await auth.currentUser.getIdToken(forceRefresh && attempt === 0);
+      return true;
+    } catch (err) {
+      const transient = isTransientAuthError(err);
+      const canRetry = attempt < FIRESTORE_AUTH_RETRY_DELAYS_MS.length - 1;
+      if (transient && canRetry) {
+        await sleepMs(FIRESTORE_AUTH_RETRY_DELAYS_MS[attempt]);
+        continue;
+      }
+      if (!forceRefresh) {
+        console.warn('Failed to verify Firebase auth token before Firestore access:', err);
+      } else {
+        console.warn('Failed to refresh Firebase auth token before Firestore access:', err);
+      }
+      return false;
+    }
   }
+
+  return false;
 }
 
 async function getDocWithAuth(docRef: ReturnType<typeof doc>, userId: string) {
@@ -58,11 +90,26 @@ async function getDocWithAuth(docRef: ReturnType<typeof doc>, userId: string) {
     return await getDoc(docRef);
   } catch (err: any) {
     if (err?.code === PERMISSION_DENIED_CODE && auth?.currentUser) {
+      if (!(await ensureFirestoreAuth(userId, true))) {
+        return null;
+      }
       try {
-        await auth.currentUser.getIdToken(true);
         return await getDoc(docRef);
       } catch (retryErr) {
         throw retryErr;
+      }
+    }
+    if (isTransientAuthError(err)) {
+      for (const delay of FIRESTORE_AUTH_RETRY_DELAYS_MS) {
+        await sleepMs(delay);
+        if (!(await ensureFirestoreAuth(userId))) continue;
+        try {
+          return await getDoc(docRef);
+        } catch (retryErr: any) {
+          if (retryErr?.code !== PERMISSION_DENIED_CODE && !isTransientAuthError(retryErr)) {
+            throw retryErr;
+          }
+        }
       }
     }
     throw err;

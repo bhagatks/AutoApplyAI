@@ -49,7 +49,7 @@ The final structure generated upon completing onboarding is:
 ```json
 {
   "customerId": "customer_fname_lname",
-  "geminiApiKey": "AIzaSyDLCZuzvlI0-Wp5sDvFWBlT3Wpe1oo2a7Y",
+  "geminiApiKey": "YOUR_GEMINI_API_KEY",
   "outputDir": "/Users/bstar/Downloads/resume_backup/",
   "candidateProfile": {
     "firstName": "f_name",

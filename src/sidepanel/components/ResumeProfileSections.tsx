@@ -1,6 +1,11 @@
 import React from 'react';
 import { Briefcase, MapPin, Link2, GraduationCap, Plus, Trash2 } from 'lucide-react';
 import { WorkExperience, EducationEntry, emptyEducationEntry, CREDENTIAL_TYPE_OPTIONS, getCredentialFieldLabels } from '../../shared/resume-types';
+import {
+  MONTH_OPTIONS,
+  combineResumeDateParts,
+  parseResumeDateParts,
+} from '../../shared/resume-dates';
 import CompetencyAddPicker from './CompetencyAddPicker';
 import SkillAddPicker from './SkillAddPicker';
 import {
@@ -27,6 +32,114 @@ const sectionTitleStyle: React.CSSProperties = {
   borderBottom: '1px solid var(--panel-border)',
   paddingBottom: 6,
 };
+
+function ResumeDateRangeFields({
+  startDate,
+  endDate,
+  onStartChange,
+  onEndChange,
+  disabled,
+  allowPresent,
+  startLabel = 'Start',
+  endLabel = 'End',
+  invalidKey,
+  invalidFields,
+  onTouch,
+}: {
+  startDate: string;
+  endDate: string;
+  onStartChange: (value: string) => void;
+  onEndChange: (value: string) => void;
+  disabled: boolean;
+  allowPresent?: boolean;
+  startLabel?: string;
+  endLabel?: string;
+  invalidKey?: OnboardingFieldKey;
+  invalidFields?: Set<OnboardingFieldKey> | null;
+  onTouch?: (key: OnboardingFieldKey, fn: () => void) => void;
+}) {
+  const startParts = parseResumeDateParts(startDate);
+  const endParts = parseResumeDateParts(endDate);
+  const invalid = invalidKey ? isFieldInvalid(invalidFields ?? null, invalidKey) : false;
+
+  const updateStart = (year: string, month: string) => {
+    const next = combineResumeDateParts(year, month);
+    if (onTouch && invalidKey) onTouch(invalidKey, () => onStartChange(next));
+    else onStartChange(next);
+  };
+
+  const updateEnd = (year: string, month: string, isPresent: boolean) => {
+    const next = combineResumeDateParts(year, month, isPresent);
+    if (onTouch && invalidKey) onTouch(invalidKey, () => onEndChange(next));
+    else onEndChange(next);
+  };
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }} data-field-key={invalidKey}>
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 8 }}>
+        <span style={{ ...labelStyle, gridColumn: '1 / -1', marginBottom: -4 }}>{startLabel}</span>
+        <select
+          className="form-control"
+          value={startParts.month}
+          disabled={disabled}
+          onChange={(e) => updateStart(startParts.year, e.target.value)}
+        >
+          {MONTH_OPTIONS.map((option) => (
+            <option key={`start-month-${option.value || 'none'}`} value={option.value}>
+              {option.label}
+            </option>
+          ))}
+        </select>
+        <input
+          className={invalid ? 'form-control field-invalid' : 'form-control'}
+          placeholder="Year *"
+          inputMode="numeric"
+          maxLength={4}
+          value={startParts.year}
+          disabled={disabled}
+          onChange={(e) => updateStart(e.target.value.replace(/\D/g, '').slice(0, 4), startParts.month)}
+        />
+        <div />
+      </div>
+      <div style={{ display: 'grid', gridTemplateColumns: allowPresent ? '1fr 1fr 1fr' : '1fr 1fr', gap: 8 }}>
+        <span style={{ ...labelStyle, gridColumn: '1 / -1', marginBottom: -4 }}>{endLabel}</span>
+        <select
+          className="form-control"
+          value={endParts.month}
+          disabled={disabled || endParts.isPresent}
+          onChange={(e) => updateEnd(endParts.year, e.target.value, false)}
+        >
+          {MONTH_OPTIONS.map((option) => (
+            <option key={`end-month-${option.value || 'none'}`} value={option.value}>
+              {option.label}
+            </option>
+          ))}
+        </select>
+        <input
+          className={invalid ? 'form-control field-invalid' : 'form-control'}
+          placeholder={allowPresent ? 'Year' : 'Year (optional)'}
+          inputMode="numeric"
+          maxLength={4}
+          value={endParts.isPresent ? '' : endParts.year}
+          disabled={disabled || endParts.isPresent}
+          onChange={(e) => updateEnd(e.target.value.replace(/\D/g, '').slice(0, 4), endParts.month, false)}
+        />
+        {allowPresent && (
+          <label style={{ ...labelStyle, fontWeight: 500, alignSelf: 'center' }}>
+            <input
+              type="checkbox"
+              checked={endParts.isPresent}
+              disabled={disabled}
+              onChange={(e) => updateEnd('', '', e.target.checked)}
+              style={{ marginRight: 6 }}
+            />
+            Present
+          </label>
+        )}
+      </div>
+    </div>
+  );
+}
 
 export interface ResumeProfileSectionsProps {
   disabled: boolean;
@@ -284,9 +397,20 @@ export default function ResumeProfileSections(props: ResumeProfileSectionsProps)
           <input className={fieldControlClass(invalidFields, `exp-${idx}-title`)} data-field-key={`exp-${idx}-title`} placeholder="Job title *" value={job.jobTitle} disabled={disabled} onChange={(e) => touch(`exp-${idx}-title`, () => updateJob(idx, { jobTitle: e.target.value }))} />
           <input className={fieldControlClass(invalidFields, `exp-${idx}-company`)} data-field-key={`exp-${idx}-company`} placeholder="Company *" value={job.company} disabled={disabled} onChange={(e) => touch(`exp-${idx}-company`, () => updateJob(idx, { company: e.target.value }))} />
           <input className="form-control" placeholder="Location" value={job.location || ''} disabled={disabled} onChange={(e) => updateJob(idx, { location: e.target.value })} />
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }} data-field-key={`exp-${idx}-dates`}>
-            <input className={fieldControlClass(invalidFields, `exp-${idx}-dates`)} placeholder="Start (YYYY-MM) *" value={job.startDate} disabled={disabled} onChange={(e) => touch(`exp-${idx}-dates`, () => updateJob(idx, { startDate: e.target.value }))} />
-            <input className={fieldControlClass(invalidFields, `exp-${idx}-dates`)} placeholder="End (YYYY-MM or Present) *" value={job.endDate} disabled={disabled} onChange={(e) => touch(`exp-${idx}-dates`, () => updateJob(idx, { endDate: e.target.value }))} />
+          <div data-field-key={`exp-${idx}-dates`}>
+            <ResumeDateRangeFields
+              startDate={job.startDate}
+              endDate={job.endDate}
+              disabled={disabled}
+              allowPresent
+              startLabel="Start date *"
+              endLabel="End date *"
+              invalidKey={`exp-${idx}-dates`}
+              invalidFields={invalidFields}
+              onTouch={touch}
+              onStartChange={(value) => updateJob(idx, { startDate: value })}
+              onEndChange={(value) => updateJob(idx, { endDate: value })}
+            />
           </div>
           <label style={fieldLabelStyle(invalidFields, `exp-${idx}-bullets`, labelStyle)}>Bullets * (one per line)</label>
           <textarea
@@ -396,22 +520,15 @@ export default function ResumeProfileSections(props: ResumeProfileSectionsProps)
             disabled={disabled}
             onChange={(e) => updateEducation(idx, { location: e.target.value })}
           />
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
-            <input
-              className="form-control"
-              placeholder="Start (optional, YYYY or YYYY-MM)"
-              value={entry.startDate}
-              disabled={disabled}
-              onChange={(e) => updateEducation(idx, { startDate: e.target.value })}
-            />
-            <input
-              className="form-control"
-              placeholder={labels.endDate}
-              value={entry.endDate}
-              disabled={disabled}
-              onChange={(e) => updateEducation(idx, { endDate: e.target.value })}
-            />
-          </div>
+          <ResumeDateRangeFields
+            startDate={entry.startDate}
+            endDate={entry.endDate}
+            disabled={disabled}
+            startLabel="Start (optional)"
+            endLabel={labels.endDate.replace(' (optional, YYYY or YYYY-MM)', '')}
+            onStartChange={(value) => updateEducation(idx, { startDate: value })}
+            onEndChange={(value) => updateEducation(idx, { endDate: value })}
+          />
           <input
             className="form-control"
             placeholder={labels.honors}

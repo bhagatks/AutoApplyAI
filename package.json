@@ -7,7 +7,9 @@
     "dev": "vite",
     "build": "tsc && node build.js",
     "preview": "vite preview",
-    "test": "node src/shared/verify_flow.js",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:flow": "node src/shared/verify_flow.js",
     "seed:competencies": "tsx scripts/seed-core-competencies.ts",
     "generate:skills": "node scripts/generate-core-skills-seed.mjs",
     "seed:skills": "tsx scripts/seed-core-skills.ts"
@@ -33,6 +35,7 @@
     "tailwindcss": "^4.3.0",
     "tsx": "^4.19.0",
     "typescript": "^5.2.2",
-    "vite": "^5.1.0"
+    "vite": "^5.1.0",
+    "vitest": "^3.2.4"
   }
 }

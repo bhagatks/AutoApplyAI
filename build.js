@@ -17,10 +17,21 @@ function copyPublicAssets() {
   console.log('--- Copied public/ assets to dist/ ---');
 }
 
+/** Strip dev-only onboarding keys from production bundles (.env.local must not leak into dist). */
+const stripDevEnvDefines = {
+  'import.meta.env.VITE_ONBOARDING_DEV_INJECT': JSON.stringify('false'),
+  'import.meta.env.VITE_DEV_KEY_GEMINI': JSON.stringify(''),
+  'import.meta.env.VITE_DEV_KEY_OPENAI': JSON.stringify(''),
+  'import.meta.env.VITE_DEV_KEY_ANTHROPIC': JSON.stringify(''),
+  'import.meta.env.VITE_DEV_KEY_GROK': JSON.stringify(''),
+};
+
 async function runBuilds() {
   console.log('--- Phase 1: Building React UI (Dashboard & Sidepanel) ---');
   await build({
     configFile: false,
+    mode: 'production',
+    define: stripDevEnvDefines,
     plugins: [react(), tailwindcss()],
     build: {
       outDir: 'dist',
@@ -45,7 +56,9 @@ async function runBuilds() {
   console.log('--- Phase 2: Building Background Service Worker (Self-Contained) ---');
   await build({
     configFile: false,
+    mode: 'production',
     define: {
+      ...stripDevEnvDefines,
       'process.env.NODE_ENV': JSON.stringify('production'),
     },
     build: {
@@ -70,6 +83,8 @@ async function runBuilds() {
   console.log('--- Phase 3: Building Content Script (Self-Contained) ---');
   await build({
     configFile: false,
+    mode: 'production',
+    define: stripDevEnvDefines,
     build: {
       outDir: 'dist',
       emptyOutDir: false,
