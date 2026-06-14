@@ -1,3 +1,4 @@
+import { PDFDocument, StandardFonts, rgb } from 'pdf-lib';
 import type { MasterResumePreviewModel } from '../resume-preview-model';
 import { exportMasterResumePdf as exportPdf } from './export-master';
 
@@ -9,7 +10,6 @@ export async function exportResumePdf(model: MasterResumePreviewModel): Promise<
 }
 
 export async function exportCoverLetterPdf(text: string, fullName: string): Promise<Uint8Array> {
-  const { PDFDocument, StandardFonts, rgb } = await import('pdf-lib');
   const PAGE_WIDTH = 612;
   const PAGE_HEIGHT = 792;
   const MARGIN = Math.round(0.35 * 72);

@@ -19,8 +19,8 @@ import {
 import { Job, ResumeRules, BaseProfile, CustomerConfig } from '../shared/types';
 import { normalizeName } from '../shared/utils';
 import { formatAiErrorToast } from '../shared/ai-errors';
-import { deleteJobFromDb, signInWithGoogleTokens, getUserProfile, auth, saveCloudApiKey, getCloudApiKey, saveUserData, getUserData, getJobsFromDb, prepareFirestoreAccess, bootstrapAppConfig, bootstrapAiModelsConfig, startAppConfigRefreshInterval, clearAppConfigCache } from '../shared/db';
-import { clearAiModelsCache, startAiModelsCacheListener } from '../shared/ai-models-cache';
+import { deleteJobFromDb, signInWithGoogleTokens, getUserProfile, auth, saveCloudApiKey, getCloudApiKey, saveUserData, getUserData, getJobsFromDb, prepareFirestoreAccess, bootstrapAppConfig, startAppConfigRefreshInterval, clearAppConfigCache } from '../shared/db';
+import { bootstrapAiModelsConfig, clearAiModelsCache, startAiModelsCacheListener } from '../shared/ai-models-cache';
 import { initSentry } from '../shared/sentry';
 import { encryptKey, decryptKey } from '../shared/crypto';
 import { onAuthStateChanged, signOut, User } from 'firebase/auth';

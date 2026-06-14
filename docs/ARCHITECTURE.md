@@ -54,7 +54,7 @@ src/
 └── shared/
     ├── ai.ts            # Gemini / multi-provider AI passes + resume parsing
     ├── tailor-job.ts    # End-to-end tailor orchestration
-    ├── db.ts            # Firestore + auth helpers
+    ├── db.ts            # Firestore + auth helpers (no cache re-exports)
     ├── resume-engine/   # Resolve, validate, format, export
     ├── resume-extract.ts # PDF/DOCX/TXT geometric text extraction
     ├── resume-types.ts  # Parsed resume contracts, Zod validation, quality analysis
@@ -100,4 +100,5 @@ npm run test:flow
 | 2026-06-14 | `parseResumeFile` orchestrator — routes Gemini 2.0 Flash to native parser, other providers/models to legacy `ai.ts` stack; MicroOnboarding wired to single entry point |
 | 2026-06-14 | `src/parser/` — dual-route resume parser (`NormalizedResume`, deterministic keyword engine, Gemini `gemini-2.0-flash` schema route, `parseResumeFile` orchestrator) |
 | 2026-06-14 | `ai-models-cache.ts` — reads `aiModelsUpdate` from `appConfig/dataRefresh.aiModelsUpdate` (flat) or `appConfig/appConfig.dataRefresh.aiModelsUpdate` (nested); re-read TTL from `dataRefresh.interval` (mins) |
+| 2026-06-14 | Break `db.ts` ↔ `ai-models-cache.ts` circular chunk — sidepanel imports `bootstrapAiModelsConfig` / `clearAiModelsCache` directly from `ai-models-cache.ts`; `db.ts` no longer re-exports cache lifecycle |
 | 2026-06-13 | Admin `inspect-mail-queue.ts` + `npm run inspect:mail` — reads namespaced mail collection (`FIRESTORE_ENV` selects `dev` vs `prod`) |

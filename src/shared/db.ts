@@ -55,7 +55,6 @@ export {
   getSupportMailAddress,
   startAppConfigRefreshInterval,
 } from './app-config-cache';
-export { bootstrapAiModelsConfig, clearAiModelsCache } from './ai-models-cache';
 
 const PERMISSION_DENIED_CODE = 'permission-denied';
 const FIRESTORE_AUTH_RETRY_DELAYS_MS = [400, 1200, 2500];
