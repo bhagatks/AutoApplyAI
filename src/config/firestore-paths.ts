@@ -9,6 +9,9 @@ export const isDevEnvironment = import.meta.env.DEV;
 
 export const APP_CONFIG_COLLECTION = 'appConfig';
 
+/** Root config document — nested `dataRefresh.aiModelsUpdate` controls model cache refresh (hours). */
+export const APP_CONFIG_ROOT_DOC = 'appConfig';
+
 /** Per-user settings subcollection under users/{uid}/ */
 export const USER_DATA_COLLECTION = 'userData';
 

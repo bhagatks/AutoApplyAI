@@ -13,7 +13,8 @@ Open **setup tasks**, **decisions**, and **backlog** only. Finished work is arch
 | Status | Item | Notes |
 |--------|------|-------|
 | `now` | **Seed `appConfig/emailJs`** | `{ "email", "serviceId", "templateId", "publicKey", "status": true }`. Run `npm run seed:emailjs` with `GOOGLE_APPLICATION_CREDENTIALS` + `EMAILJS_*` env vars. Legacy `appConfig/supportEmail` still works as destination fallback. |
-| `now` | **Create `appConfig/dataRefresh`** | `{ "interval": N }` — minutes between cached reads (`0` = always fetch). Default in code is 5 if missing. No seed script yet; add manually in Firebase console. |
+| `now` | **Create `appConfig/dataRefresh`** | `{ "interval": N, "aiModelsUpdate": N }` — `interval` = minutes between cached Firestore reads (`0` = always fetch); `aiModelsUpdate` = hours between model catalog API refreshes (`0` = fetch on each flow entry). Also supported: nested `appConfig/appConfig.dataRefresh.aiModelsUpdate`. Default interval 5 / aiModelsUpdate 24 if missing. |
+| `now` | **Create `appConfig/appConfig`** _(optional)_ | `{ "dataRefresh": { "aiModelsUpdate": N } }` — alternate location for `aiModelsUpdate` if you prefer a separate doc; `appConfig/dataRefresh.aiModelsUpdate` takes precedence when both exist only if nested doc parses successfully. |
 | `now` | **Create `appConfig/sentry`** | `{ "dsn", "enabled": true }` — shared across dev/prod runtimes. `VITE_SENTRY_*` / `VITE_APP_VERSION` in `.env.local` are fallbacks when Firestore is unavailable. |
 | `now` | **Deploy updated Firestore rules** | Rules include `dev/v1/*` and `prod/v1/*` namespaces plus legacy root paths. Run `firebase deploy --only firestore:rules`. |
 | `now` | **Rebuild + reload extension** | After Firestore seeds or `.env.local` changes (`VITE_EMAILJS_*`, `VITE_DEV_KEY_*`, `VITE_SENTRY_*`): `npm run build`, reload at `chrome://extensions`. |

@@ -40,7 +40,7 @@ All of the following fields are strictly required:
 | `email` | `string` | Google Profile (Email Address) | Candidate's email contact. |
 | `phone` | `string` | User Input | Candidate's phone number (e.g., `555-555-5555`). |
 | `geminiApiKey` | `string` | User Input | Gemini API key used for tailoring (e.g., starts with `AIzaSy`). |
-| `outputDir` | `string` | User Input | Display label for the output folder (folder name from picker). Authoritative write handle lives in IndexedDB — not `customer_config`. |
+| `outputDir` | `string` | Auto (`AutoApplyAI`) | Logical export root under the user's Downloads folder (`Downloads/AutoApplyAI/…`). No folder picker during onboarding. |
 | `resume` | `string` | File Upload (PDF) | PDF resume file name. Saved locally & referenced. |
 
 ### Configuration Structure (`customer_config`)
@@ -50,7 +50,7 @@ The final structure generated upon completing onboarding is:
 {
   "customerId": "customer_fname_lname",
   "geminiApiKey": "YOUR_GEMINI_API_KEY",
-  "outputDir": "MyResumes",
+  "outputDir": "AutoApplyAI",
   "candidateProfile": {
     "firstName": "f_name",
     "lastName": "l_name",
@@ -124,7 +124,7 @@ resume_pdf/
 coverletter_pdf/
 ```
 
-Files are written via the File System Access API handle saved at onboarding. Re-select the output folder if write permission expires.
+Files are written via `chrome.downloads` into `Downloads/AutoApplyAI/` (e.g. `Resumes/base_resume.pdf`, `resume_pdf/`, `coverletter_pdf/`).
 
 ### Assist apply (MVP)
 - **LinkedIn** and **Greenhouse** adapters prefill contact fields + AI free-text answers
@@ -135,6 +135,4 @@ Files are written via the File System Access API handle saved at onboarding. Re-
 ### Storage keys
 - `pipeline_queue_v1` — job queue (mirrored to `localHistory` for compatibility)
 - `pipeline_settings_v1` — `{ paused, maxConcurrentTailors, autoStartApply }`
-- `output_dir_label` — chrome.storage.local display label for the picked output folder
-- IndexedDB `autoapplyai-fs` — persisted `outputDir` handle for artifact writes (authoritative for folder selection)
-- Get Started folder picker delegates to the active tab's content script (`OPEN_NATIVE_DIRECTORY_PICKER` → native OS dialog); falls back to `directory-picker.html` when no injectable tab is available
+- `output_dir_label` — legacy display label; defaults to `AutoApplyAI` (downloads path root)

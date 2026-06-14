@@ -9,7 +9,7 @@ import { doc, getDoc } from 'firebase/firestore';
 import { getGlobalAppConfigPath } from '../config/firestore-paths';
 import { db, prepareFirestoreAccess } from './db';
 import { getChromeLocal, setChromeLocal } from './storage';
-import { traceLog } from './trace-logger';
+import { traceLog, configDiagMessage } from './trace-logger';
 
 const CACHE_STORAGE_KEY = 'app_config_cache_v1';
 const DEFAULT_DATA_REFRESH_MINUTES = 5;
@@ -89,14 +89,32 @@ export async function fetchDataRefreshConfig(userId: string): Promise<DataRefres
 
   const snap = await getDoc(doc(db, ...getGlobalAppConfigPath('dataRefresh')));
   if (!snap.exists()) {
-    traceLog.debug('FIRESTORE', 'fetchDataRefreshConfig', 'appConfig/dataRefresh missing — using default');
+    traceLog.info('FIRESTORE', 'fetchDataRefreshConfig', 'appConfig/dataRefresh missing — using default interval', {
+      firestorePath: 'appConfig/dataRefresh',
+      projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID || '(unset)',
+      firestoreExists: false,
+      defaultMinutes: DEFAULT_DATA_REFRESH_MINUTES,
+    });
     return { interval: DEFAULT_DATA_REFRESH_MINUTES };
   }
 
-  const interval = snap.data().interval;
-  return {
-    interval: typeof interval === 'number' && Number.isFinite(interval) ? interval : DEFAULT_DATA_REFRESH_MINUTES,
-  };
+  const raw = snap.data();
+  const interval = raw.interval;
+  const resolved =
+    typeof interval === 'number' && Number.isFinite(interval) ? interval : DEFAULT_DATA_REFRESH_MINUTES;
+  traceLog.info(
+    'FIRESTORE',
+    'fetchDataRefreshConfig',
+    configDiagMessage({
+      projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID || '(unset)',
+      firestorePath: 'appConfig/dataRefresh',
+      firestoreExists: true,
+      firestoreRawInterval: interval ?? null,
+      parsedIntervalMinutes: resolved,
+      alwaysFetch: resolved === 0,
+    })
+  );
+  return { interval: resolved };
 }
 
 export async function fetchSupportEmailConfigFromFirestore(userId: string): Promise<SupportEmailConfig | null> {

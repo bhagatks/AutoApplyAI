@@ -211,50 +211,5 @@ export async function extractResumeDocumentText(
   return { text: text.trim(), pageCount, warnings, likelyScanned };
 }
 
-type WritableDirectoryHandle = FileSystemDirectoryHandle & {
-  queryPermission(descriptor: { mode: 'readwrite' }): Promise<PermissionState>;
-  requestPermission(descriptor: { mode: 'readwrite' }): Promise<PermissionState>;
-};
-
-export async function ensureDirectoryWriteAccess(
-  dirHandle: FileSystemDirectoryHandle
-): Promise<boolean> {
-  const handle = dirHandle as WritableDirectoryHandle;
-  const opts = { mode: 'readwrite' as const };
-  if ((await handle.queryPermission(opts)) === 'granted') return true;
-  return (await handle.requestPermission(opts)) === 'granted';
-}
-
-export async function saveResumeToDirectory(
-  dirHandle: FileSystemDirectoryHandle | null,
-  file: File,
-  saveName = 'base_resume'
-): Promise<string | undefined> {
-  if (!dirHandle) return undefined;
-
-  const hasAccess = await ensureDirectoryWriteAccess(dirHandle);
-  if (!hasAccess) {
-    throw new Error(
-      'Write access to the output folder was denied. Re-select the folder or complete onboarding to save the resume.'
-    );
-  }
-
-  const lower = file.name.toLowerCase();
-  const ext = lower.endsWith('.docx') ? '.docx' : lower.endsWith('.txt') ? '.txt' : '.pdf';
-  const targetName = `${saveName}${ext}`;
-
-  try {
-    const fileHandle = await dirHandle.getFileHandle(targetName, { create: true });
-    const writable = await fileHandle.createWritable();
-    await writable.write(file);
-    await writable.close();
-    return targetName;
-  } catch (err) {
-    if (err instanceof DOMException && err.name === 'SecurityError') {
-      throw new Error(
-        'Folder write permission expired. Re-select the output folder, then upload your resume again.'
-      );
-    }
-    throw err;
-  }
-}
+export { saveResumeToDirectory } from './downloads';
+export type { DownloadResult } from './downloads';

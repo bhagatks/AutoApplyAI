@@ -1,5 +1,6 @@
 import { CustomerConfig, ResumeRules } from './types';
 import { getLayoutBudgetForPages, MAX_PAGES } from './resume-engine/compute-page-budget';
+import { DEFAULT_OUTPUT_DIR } from './downloads';
 
 export const DEFAULT_RESUME_PAGE_LIMIT = 1;
 export const MIN_RESUME_PAGE_LIMIT = 1;
@@ -86,7 +87,7 @@ export function applyPageLimitToResumeRules(rules: ResumeRules, pageLimit: numbe
   };
 }
 
-export function buildResumeRulesForCustomer(outputDir: string, pageLimit?: number): ResumeRules {
+export function buildResumeRulesForCustomer(outputDir = DEFAULT_OUTPUT_DIR, pageLimit?: number): ResumeRules {
   return applyPageLimitToResumeRules(getDefaultResumeRules(outputDir), clampResumePageLimit(pageLimit));
 }
 
@@ -95,7 +96,7 @@ export function resolveResumeRulesFromStorage(
   customerConfig: Pick<CustomerConfig, 'outputDir' | 'resumePageLimit'> | null | undefined
 ): ResumeRules {
   const pageLimit = DEFAULT_RESUME_PAGE_LIMIT;
-  const outputDir = customerConfig?.outputDir?.trim() || '';
+  const outputDir = customerConfig?.outputDir?.trim() || DEFAULT_OUTPUT_DIR;
 
   if (storedRulesJson) {
     try {

@@ -15,7 +15,7 @@ import {
 } from './resume-engine';
 import { buildMasterResumePreviewFromJob } from './resume-preview-model';
 import { buildResumeLatexFromJob } from './master-resume-latex';
-import { buildAndSaveJobArtifacts, loadOutputDirHandle } from './artifacts';
+import { buildAndSaveJobArtifacts } from './artifacts';
 import { normalizeName } from './utils';
 import { upsertPipelineJob } from './pipeline-storage';
 import { applyPageLimitToResumeRules } from './resume-builder-config';
@@ -58,9 +58,6 @@ export async function saveArtifactsForJob(
     masterModel.fullName
   );
 
-  const handle = await loadOutputDirHandle();
-  if (!handle) return job;
-
   const resumePlain = masterResumeModelToPlainText(masterModel);
   const coverPlain = coverLetterToPlainText(job.coverLetter);
 
@@ -75,8 +72,6 @@ export async function saveArtifactsForJob(
     resumeDocxBlob,
     coverDocxBlob
   );
-
-  if (!paths) return job;
 
   const updated: Job = {
     ...job,

@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { sanitizeResumeDate } from './resume-dates';
+import { DEFAULT_OUTPUT_DIR } from './downloads';
 
 export interface WorkExperience {
   jobTitle: string;
@@ -848,7 +849,7 @@ export function isCustomerConfigComplete(config: {
     config.customerId &&
     config.aiProvider &&
     config.geminiApiKey &&
-    config.outputDir &&
+    (config.outputDir || DEFAULT_OUTPUT_DIR) &&
     config.candidateProfile &&
     config.candidateProfile.firstName &&
     config.candidateProfile.lastName &&

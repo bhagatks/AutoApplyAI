@@ -877,6 +877,25 @@ textarea.form-control { resize: vertical; min-height: 120px; }
   color: var(--text-primary);
 }
 
+.toast-action {
+  flex-shrink: 0;
+  background: transparent;
+  border: 1px solid currentColor;
+  border-radius: 999px;
+  color: inherit;
+  cursor: pointer;
+  font: inherit;
+  font-size: 0.72rem;
+  font-weight: 600;
+  padding: 4px 10px;
+  white-space: nowrap;
+  transition: background 0.15s ease, opacity 0.15s ease;
+}
+
+.toast-action:hover {
+  background: rgba(248, 250, 252, 0.08);
+}
+
 .toast-dismiss {
   display: flex;
   flex-shrink: 0;

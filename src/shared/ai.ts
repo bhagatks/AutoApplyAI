@@ -8,32 +8,38 @@ import {
   formatGrokAccessDeniedError,
 } from './ai-errors';
 import { enqueueGeminiRequest, notifyGeminiRateLimited } from './ai-request-queue';
+import {
+  DEFAULT_PROVIDER_MODELS,
+  getDefaultModelsForProvider,
+  type AiProvider,
+} from './ai-provider-catalog';
+import { fetchProviderModelsFromApi } from './ai-model-api';
+import {
+  getCachedModelsForProvider,
+  refreshModelCache,
+  updateCachedProviderModels,
+} from './ai-models-cache';
 import { traceAsync, traceLog } from './trace-logger';
 
-export type AiProvider = 'gemini' | 'openai' | 'anthropic' | 'grok';
+export type { AiProvider, AiModelsCache } from './ai-provider-catalog';
+export {
+  AI_MODELS_CACHE_KEY,
+  DEFAULT_PROVIDER_MODELS,
+  getDefaultModelsForProvider,
+} from './ai-provider-catalog';
+export { fetchProviderModelsFromApi } from './ai-model-api';
+export {
+  clearAiModelsCache,
+  bootstrapAiModelsConfig,
+  getCachedModels,
+  getCachedModelsForProvider,
+  refreshModelCache,
+  startAiModelsCacheListener,
+  stopAiModelsCacheListener,
+  updateCachedProviderModels,
+} from './ai-models-cache';
 
 export { formatProviderApiError, parseGeminiErrorMessage } from './ai-errors';
-
-export const DEFAULT_PROVIDER_MODELS: Record<AiProvider, string[]> = {
-  gemini: ['gemini-2.0-flash', 'gemini-2.5-flash', 'gemini-flash-latest', 'gemini-1.5-flash', 'gemini-pro-latest'],
-  openai: ['gpt-4o-mini', 'gpt-4o', 'o1-mini', 'gpt-4-turbo'],
-  anthropic: ['claude-3-5-sonnet-latest', 'claude-3-5-sonnet-20241022', 'claude-3-5-haiku-latest', 'claude-3-opus-latest'],
-  grok: ['grok-4.3', 'grok-4', 'grok-2-latest', 'grok-3-mini'],
-};
-
-export const AI_MODELS_CACHE_KEY = 'ai_models_cache';
-
-export interface AiModelsCache {
-  gemini?: string[];
-  openai?: string[];
-  anthropic?: string[];
-  grok?: string[];
-  updatedAt?: number;
-}
-
-export function getDefaultModelsForProvider(provider: AiProvider): string[] {
-  return [...DEFAULT_PROVIDER_MODELS[provider]];
-}
 
 export function getProviderLabel(provider: AiProvider): string {
   return getProviderLabelFromErrors(provider);
@@ -72,125 +78,16 @@ export function formatProviderOptionLabel(provider: AiProvider, models: string[]
   return `${brandNames[provider]} (${friendly})`;
 }
 
-async function readModelsCache(): Promise<AiModelsCache | null> {
-  try {
-    if (typeof chrome !== 'undefined' && chrome.storage?.local) {
-      return await new Promise<AiModelsCache | null>((resolve) => {
-        chrome.storage.local.get([AI_MODELS_CACHE_KEY], (res) => {
-          resolve((res[AI_MODELS_CACHE_KEY] as AiModelsCache) || null);
-        });
-      });
-    }
-    const raw = localStorage.getItem(AI_MODELS_CACHE_KEY);
-    return raw ? (JSON.parse(raw) as AiModelsCache) : null;
-  } catch (err) {
-    console.warn('Failed to read AI models cache:', err);
-    return null;
-  }
-}
-
-async function writeModelsCache(cache: AiModelsCache): Promise<void> {
-  const payload: AiModelsCache = { ...cache, updatedAt: Date.now() };
-  try {
-    if (typeof chrome !== 'undefined' && chrome.storage?.local) {
-      await new Promise<void>((resolve) => {
-        chrome.storage.local.set({ [AI_MODELS_CACHE_KEY]: payload }, () => resolve());
-      });
-      return;
-    }
-    localStorage.setItem(AI_MODELS_CACHE_KEY, JSON.stringify(payload));
-  } catch (err) {
-    console.warn('Failed to write AI models cache:', err);
-  }
-}
-
 function geminiKeyParam(apiKey: string): string {
   return encodeURIComponent(apiKey.trim());
-}
-
-async function fetchModelsFromApi(
-  provider: AiProvider,
-  apiKey?: string
-): Promise<string[] | null> {
-  const key = apiKey?.trim() || '';
-  try {
-    if (provider === 'gemini') {
-      if (!key) return null;
-      const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models?key=${geminiKeyParam(key)}`);
-      if (!res.ok) return null;
-      const json = await res.json();
-      const models = (json.models || [])
-        .filter((m: any) => m.supportedGenerationMethods?.includes('generateContent') && m.name?.includes('gemini-') && !m.name?.includes('embedding') && !m.name?.includes('vision'))
-        .map((m: any) => m.name.replace('models/', ''));
-      return models.length > 0 ? models : null;
-    }
-    if (provider === 'openai') {
-      if (!key) return null;
-      const res = await fetch('https://api.openai.com/v1/models', {
-        headers: { Authorization: `Bearer ${key}` },
-      });
-      if (!res.ok) return null;
-      const json = await res.json();
-      const models = (json.data || [])
-        .filter((m: any) => m.id.startsWith('gpt-') || m.id.startsWith('o1-'))
-        .map((m: any) => m.id)
-        .sort();
-      return models.length > 0 ? models : null;
-    }
-    if (provider === 'grok') {
-      if (!key) return null;
-      return fetchGrokModelsViaChatProbe(key);
-    }
-    if (provider === 'anthropic') {
-      if (!key) return null;
-      const res = await fetch('https://api.anthropic.com/v1/models', {
-        headers: {
-          'x-api-key': key,
-          'anthropic-version': '2023-06-01',
-          'anthropic-dangerous-direct-browser-access': 'true',
-        },
-      });
-      if (!res.ok) return null;
-      const json = await res.json();
-      const models = (json.data || [])
-        .map((m: any) => m.id)
-        .filter(Boolean)
-        .sort();
-      return models.length > 0 ? models : null;
-    }
-  } catch (err) {
-    console.warn(`Failed to fetch ${provider} models from API:`, err);
-  }
-  return null;
 }
 
 export async function prefetchAllProviderModels(options?: {
   apiKey?: string;
   activeProvider?: AiProvider;
 }): Promise<Record<AiProvider, string[]>> {
-  const cached = await readModelsCache();
-  const providers: AiProvider[] = ['gemini', 'openai', 'anthropic', 'grok'];
-  const activeProvider = options?.activeProvider;
-  const activeKey = options?.apiKey?.trim() || '';
-
-  const entries = await Promise.all(
-    providers.map(async (provider) => {
-      const apiKey = provider === activeProvider ? activeKey : '';
-      const fromApi = await fetchModelsFromApi(provider, apiKey || undefined);
-      if (fromApi?.length) {
-        return [provider, fromApi] as const;
-      }
-      const cachedModels = cached?.[provider];
-      if (cachedModels?.length) {
-        return [provider, cachedModels] as const;
-      }
-      return [provider, getDefaultModelsForProvider(provider)] as const;
-    })
-  );
-
-  const catalog = Object.fromEntries(entries) as Record<AiProvider, string[]>;
-  await writeModelsCache({ ...catalog, updatedAt: Date.now() });
-  return catalog;
+  traceLog.debug('AI', 'prefetchAllProviderModels', 'flow entry — refreshing model catalog');
+  return refreshModelCache(options);
 }
 
 export const SYSTEM_INSTRUCTION = `You are an expert executive career strategist. Your purpose is to output tailored resume blocks and matching cover letters that comprehensively match a job description. You must thoroughly fill out the top sections of the document so they look substantive and executive-grade, while ensuring the total resume does not spill onto a second page.
@@ -761,15 +658,6 @@ async function probeGrokChatEndpoint(
   return { ok: res.ok, status: res.status, body };
 }
 
-async function fetchGrokModelsViaChatProbe(key: string): Promise<string[] | null> {
-  // xAI GET /v1/models is often 403; one successful chat probe is enough to trust the key.
-  const result = await probeGrokChatEndpoint(key, GROK_VERIFY_MODEL);
-  if (result.ok || result.status === 429) {
-    return [...DEFAULT_PROVIDER_MODELS.grok];
-  }
-  return null;
-}
-
 async function verifyGrokApiKey(key: string): Promise<ApiKeyVerificationResult> {
   if (!key.startsWith('xai-')) {
     return {
@@ -994,9 +882,8 @@ export {
   extractTextFromPlainText,
   extractResumeDocumentText,
   saveResumeToDirectory,
-  ensureDirectoryWriteAccess,
 } from './resume-extract';
-export type { ResumeExtractionResult } from './resume-extract';
+export type { ResumeExtractionResult, DownloadResult } from './resume-extract';
 
 function buildCandidateContextBlock(profile: BaseProfile, parsedResume?: ParsedResume | null): string {
   const lines = [
@@ -1984,25 +1871,20 @@ export async function parseResumeWithAI(
   }
 }
 
-// Smart list models helper — API first, then cache, then defaults
+// Smart list models helper — API first, then in-memory cache, then defaults
 export async function fetchAvailableModels(
   provider: AiProvider,
   apiKey?: string
 ): Promise<string[]> {
-  const fromApi = await fetchModelsFromApi(provider, apiKey);
+  const fromApi = await fetchProviderModelsFromApi(provider, apiKey);
   if (fromApi?.length) {
-    const cached = await readModelsCache();
-    await writeModelsCache({
-      ...cached,
-      [provider]: fromApi,
-      updatedAt: Date.now(),
-    });
+    await updateCachedProviderModels(provider, fromApi);
     return fromApi;
   }
 
-  const cached = await readModelsCache();
-  if (cached?.[provider]?.length) {
-    return cached[provider]!;
+  const cached = getCachedModelsForProvider(provider);
+  if (cached.length) {
+    return cached;
   }
 
   return getDefaultModelsForProvider(provider);

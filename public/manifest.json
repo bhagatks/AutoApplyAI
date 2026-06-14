@@ -5,6 +5,7 @@
   "description": "Automatically extracts job details and tailors resumes using client-side AI",
   "permissions": [
     "storage",
+    "downloads",
     "identity",
     "sidePanel",
     "tabs",
