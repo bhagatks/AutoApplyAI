@@ -18,6 +18,7 @@ function loginRedirectPlugin() {
 }
 
 export default defineConfig({
+  envPrefix: ['VITE_', 'NEXT_PUBLIC_'],
   plugins: [react(), loginRedirectPlugin(), tailwindcss()],
   server: {
     port: 3000,

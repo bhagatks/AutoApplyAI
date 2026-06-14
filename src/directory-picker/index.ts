@@ -1,10 +1,9 @@
-import { saveOutputDirHandle } from '../shared/artifacts';
 import {
   notifyOutputDirPicked,
   requestDirectoryHandle,
   directoryPickerFailureMessage,
 } from '../shared/directory-picker';
-import { ensureDirectoryWriteAccess } from '../shared/resume-extract';
+import { commitOutputDirectorySelection } from '../shared/output-directory';
 
 const root = document.getElementById('root');
 if (!root) throw new Error('Missing #root');
@@ -110,16 +109,17 @@ async function pickFolder() {
     return;
   }
 
-  const granted = await ensureDirectoryWriteAccess(result.handle);
-  if (!granted) {
-    setStatus('Write access is required. Choose the folder again and allow access.', 'error');
+  try {
+    const label = await commitOutputDirectorySelection(result.handle, result.name);
+    notifyOutputDirPicked(label);
+    setStatus(`Saved "${label}". You can close this tab.`, 'success');
+  } catch (err) {
+    const message =
+      err instanceof Error ? err.message : 'Could not save the selected folder.';
+    setStatus(message, 'error');
     pickBtn.disabled = false;
     return;
   }
-
-  await saveOutputDirHandle(result.handle);
-  notifyOutputDirPicked(result.name);
-  setStatus(`Saved "${result.name}". You can close this tab.`, 'success');
   pickBtn.disabled = false;
 
   window.setTimeout(() => {

@@ -20,7 +20,7 @@ export interface CoreCompetencyCatalog {
   updatedAt: string;
 }
 
-/** Per-user competency selections — stored at users/{uid}/config/userCompetencies */
+/** Per-user competency selections — stored at users/{uid}/userData/userCompetencies */
 export interface UserCompetencyProfile {
   /** Slug IDs from the bundled core competencies catalog */
   catalogRefs: string[];

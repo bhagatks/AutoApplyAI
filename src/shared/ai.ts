@@ -270,6 +270,10 @@ const responseSchema = {
 // Internal helper to run a streaming generate call to Gemini
 const AI_REQUEST_TIMEOUT_MS = 120_000;
 
+/** Appended to user prompts for non-Gemini providers (no runtime JSON schema enforcement). */
+const NON_GEMINI_USER_SUFFIX =
+  "\n\nCRITICAL: You must explicitly escape all percent signs as '\\%' and replace any naked ampersands with 'and'. Ensure your output matches the structural JSON specifications precisely.";
+
 async function fetchWithTimeout(
   input: RequestInfo | URL,
   init?: RequestInit,
@@ -617,6 +621,8 @@ async function runProviderCall(
     return runStreamingGeminiCall(apiKey, promptText, onProgress, modelName, systemInstruction, operation);
   }
 
+  const userContent = promptText + NON_GEMINI_USER_SUFFIX;
+
   if (provider === 'openai') {
     const url = `https://api.openai.com/v1/chat/completions`;
     const res = await fetchWithTimeout(url, {
@@ -629,7 +635,7 @@ async function runProviderCall(
         model: modelName || 'gpt-4o-mini',
         messages: [
           { role: 'system', content: systemInstruction },
-          { role: 'user', content: promptText }
+          { role: 'user', content: userContent }
         ],
         response_format: { type: "json_object" }
       })
@@ -653,7 +659,7 @@ async function runProviderCall(
         model: modelName || 'grok-4.3',
         messages: [
           { role: 'system', content: systemInstruction },
-          { role: 'user', content: promptText }
+          { role: 'user', content: userContent }
         ],
         response_format: { type: "json_object" }
       })
@@ -680,7 +686,7 @@ async function runProviderCall(
         max_tokens: 4000,
         system: systemInstruction,
         messages: [
-          { role: 'user', content: promptText + "\n\nCRITICAL: Output ONLY a raw, valid JSON object matching the requested schema. No markdown formatting, no code blocks." }
+          { role: 'user', content: userContent }
         ]
       })
     });

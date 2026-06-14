@@ -51,12 +51,12 @@ async function main() {
 
   console.log(`\n=== users/${userId} ===\n`);
 
-  const configSnap = await userRef.collection('config').get();
-  console.log(`config/ (${configSnap.size} docs)`);
-  for (const doc of configSnap.docs) {
+  const userDataSnap = await userRef.collection('userData').get();
+  console.log(`userData/ (${userDataSnap.size} docs)`);
+  for (const doc of userDataSnap.docs) {
     const data = doc.data();
-    console.log(`\n--- config/${doc.id} ---`);
-    if (doc.id === 'customerConfig' && data.parsedResume) {
+    console.log(`\n--- userData/${doc.id} ---`);
+    if (doc.id === 'userData' && data.parsedResume) {
       const { parsedResume, geminiApiKey, ...rest } = data as Record<string, unknown>;
       console.log(JSON.stringify({ ...rest, geminiApiKey: geminiApiKey ? '[REDACTED]' : undefined }, null, 2));
       const pr = parsedResume as Record<string, unknown>;

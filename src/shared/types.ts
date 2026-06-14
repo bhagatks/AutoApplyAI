@@ -89,7 +89,7 @@ export interface TailoredResume {
   snapshotVersion?: 1;
   id: string;
   jobId: string;
-  /** Links back to customerConfig.parsedResume (scannedAt or source file) */
+  /** Links back to userData.parsedResume (scannedAt or source file) */
   baseVersion: string;
   jobTitle: string;
   companyName: string;

@@ -2,22 +2,61 @@ rules_version = '2';
 
 service cloud.firestore {
   match /databases/{database}/documents {
+    // Legacy root paths (pre-namespace migrations)
     match /users/{userId}/{document=**} {
       allow read, write: if request.auth != null && request.auth.uid == userId;
-    }
-
-    match /appConfig/{configDoc} {
-      allow read: if request.auth != null;
-
-      match /{subcollection}/{subDoc} {
-        allow read: if request.auth != null;
-      }
     }
 
     match /mail/{mailId} {
       allow create: if request.auth != null
         && request.resource.data.userId == request.auth.uid
         && request.resource.data.status == 'pending';
+
+      allow update: if request.auth != null
+        && resource.data.userId == request.auth.uid
+        && resource.data.status == 'pending'
+        && request.resource.data.status in ['SUCCESS', 'ERROR'];
+    }
+
+    // Dev namespace — local Vite builds (import.meta.env.DEV)
+    match /dev/v1/users/{userId}/{document=**} {
+      allow read, write: if request.auth != null && request.auth.uid == userId;
+    }
+
+    match /dev/v1/mail/{mailId} {
+      allow create: if request.auth != null
+        && request.resource.data.userId == request.auth.uid
+        && request.resource.data.status == 'pending';
+
+      allow update: if request.auth != null
+        && resource.data.userId == request.auth.uid
+        && resource.data.status == 'pending'
+        && request.resource.data.status in ['SUCCESS', 'ERROR'];
+    }
+
+    // Prod namespace — Web Store builds
+    match /prod/v1/users/{userId}/{document=**} {
+      allow read, write: if request.auth != null && request.auth.uid == userId;
+    }
+
+    match /prod/v1/mail/{mailId} {
+      allow create: if request.auth != null
+        && request.resource.data.userId == request.auth.uid
+        && request.resource.data.status == 'pending';
+
+      allow update: if request.auth != null
+        && resource.data.userId == request.auth.uid
+        && resource.data.status == 'pending'
+        && request.resource.data.status in ['SUCCESS', 'ERROR'];
+    }
+
+    // Global runtime metadata — shared across dev and prod runtimes
+    match /appConfig/{configDoc} {
+      allow read: if request.auth != null;
+
+      match /{subcollection}/{subDoc} {
+        allow read: if request.auth != null;
+      }
     }
   }
 }

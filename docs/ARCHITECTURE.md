@@ -22,7 +22,7 @@ Build: Vite + TypeScript + React + Tailwind. Output goes to `dist/` (load unpack
 ## Data & auth
 
 - **Firebase Auth** — Google sign-in (extension OAuth2 + web).
-- **Firestore** — `users/{uid}/config/customerConfig`, jobs, tailored resume snapshots.
+- **Firestore** — Namespaced by runtime: `dev/v1/*` (Vite dev) or `prod/v1/*` (Web Store build) for `users`, `mail`, and job data; global `appConfig/*` docs shared across runtimes.
 - **Local** — `chrome.storage.local` (extension), `localStorage` (dashboard); pipeline queue state in `pipeline-storage.ts`.
 - **Onboarding gate** — Login → micro-onboarding → workspace. See [FLOW.md](../FLOW.md).
 
@@ -48,7 +48,7 @@ src/
 ├── dashboard/         # Web dashboard (React)
 ├── landing/             # Landing / login page
 ├── apply/               # Job-application adapters (types)
-├── config/              # App URLs, env-aware config
+├── config/              # `app-config-manager.ts`, `firestore-paths.ts`, env-aware URLs
 └── shared/
     ├── ai.ts            # Gemini / multi-provider AI passes + resume parsing
     ├── tailor-job.ts    # End-to-end tailor orchestration
@@ -58,6 +58,7 @@ src/
     ├── resume-types.ts  # Parsed resume contracts, Zod validation, quality analysis
     ├── resume-dates.ts  # Date string normalization
     ├── pipeline-storage.ts
+    ├── output-directory.ts  # Output folder pick/load/commit (IndexedDB + chrome.storage)
     └── types.ts         # Job, CustomerConfig, ResumeRules, etc.
 ```
 
@@ -65,7 +66,7 @@ src/
 
 - **AI** — User-supplied API keys (Gemini default; OpenAI, Anthropic, xAI host permissions in manifest).
 - **Firebase** — Auth, Firestore, hosting (`autoapplyai-3e61d.web.app`).
-- **Sentry** — Error reporting (`sentry.ts`).
+- **Sentry** — Error reporting (`sentry.ts`); DSN + enable flag from `appConfig/sentry` (cached) with `VITE_SENTRY_*` env fallback.
 
 ## Commands
 
@@ -84,7 +85,15 @@ npm run test:flow
 |------|--------|
 | 2026-06-12 | Initial v2 architecture doc (replaces stale README Python narrative) |
 | 2026-06-12 | `dist/` gitignored; production build strips dev API keys from bundles |
-| 2026-06-12 | Added `resume-parser/` — Zod-schemas, ingest-once pipeline; legacy `parseResumeWithAI` unchanged |
 | 2026-06-12 | Cross-context trace logger (`trace-logger.ts`) + sidepanel Trace Logs panel for AI/Firestore/pipeline debugging |
 | 2026-06-13 | Unified PDF/DOCX/preview/`.tex` on `master-resume-template.tex` — single `MasterResumePreviewModel` export pipeline |
-| 2026-06-13 | Support reports queue to Firestore `mail` for Trigger Email / backend delivery; requires `firebase/firestore-send-email` or custom worker |
+| 2026-06-13 | Support reports write to `{dev\|prod}/v1/mail`, send via client EmailJS (`@emailjs/browser`), then sync `status`/`delivery` on the same doc |
+| 2026-06-13 | EmailJS credentials from `appConfig/emailJs` (Firestore) with optional `NEXT_PUBLIC_EMAILJS_*` / `VITE_EMAILJS_*` build-time fallback |
+| 2026-06-13 | Merged support config: `appConfig/emailJs` holds destination `email` + EmailJS params; per-field env fallback via `resolveEmailJsConnectionConfig()` |
+| 2026-06-13 | Sidepanel boot: `waitForAuthGateway()` resolves auth + Firestore readiness before onboarding/home routing; deduped cloud sync |
+| 2026-06-13 | `app-config-cache.ts` — read cache TTL from `appConfig/dataRefresh.interval` (0 = always fetch, N = local cache N minutes); sidepanel one-time job fetch |
+| 2026-06-13 | Sentry init reads `appConfig/sentry` (`dsn`, `enabled`) via cache; falls back to `VITE_SENTRY_DSN` / `VITE_SENTRY_ENABLED` when Firestore unavailable |
+| 2026-06-13 | `app-config-manager.ts` — unified dev/prod routing (`getFirestorePath`), `getLLMCredentials()`, `resolveMonitoringConfig()`; dashboard boot uses `waitForAuthGateway()` |
+| 2026-06-13 | User Firestore paths: removed `config` subcollection; `customerConfig` → `userData/userData`; sibling docs under `userData/*` (existing user data wiped manually) |
+| 2026-06-14 | Pipeline log storm fix: sidepanel tailoring poll no longer re-fires on every `jobs` refresh; high-frequency runtime actions omitted from MSG console traces |
+| 2026-06-13 | Admin `inspect-mail-queue.ts` + `npm run inspect:mail` — reads namespaced mail collection (`FIRESTORE_ENV` selects `dev` vs `prod`) |

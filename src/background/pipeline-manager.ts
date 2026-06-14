@@ -1,4 +1,5 @@
-import { BASE_PROFILE, AiProvider } from '../shared/ai';
+import { BASE_PROFILE, type AiProvider } from '../shared/ai';
+import { getLLMCredentials } from '../config/app-config-manager';
 import { traceLog } from '../shared/trace-logger';
 import { classifyAiError } from '../shared/ai-errors';
 import { executeTailorJob } from '../shared/tailor-job';
@@ -74,14 +75,16 @@ async function loadRuntimeConfig(): Promise<{
     ? parsedResumeToBaseProfile(parsedResume)
     : localSettings.candidateProfile || BASE_PROFILE;
   const rules = resolveResumeRulesFromStorage(localSettings.resumeRules, customerConfig);
+  const provider: AiProvider = customerConfig?.aiProvider || 'gemini';
+  const apiKey = await getLLMCredentials(provider);
 
   return {
-    apiKey: localSettings.geminiApiKey || customerConfig?.geminiApiKey || '',
+    apiKey,
     userId: localSettings.userId,
     rules,
     profile,
     parsedResume,
-    provider: customerConfig?.aiProvider || 'gemini',
+    provider,
     model: customerConfig?.aiModel,
     resumeContext: customerConfig?.resumeContext,
   };

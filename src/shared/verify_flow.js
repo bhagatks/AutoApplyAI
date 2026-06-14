@@ -46,7 +46,7 @@ function runTests() {
   const incompleteConfig = {
     customerId: "customer_fname_lname_testu",
     geminiApiKey: "AIzaSyTest",
-    outputDir: "/Users/bstar/Downloads/resume_backup/",
+    outputDir: "/tmp/autoapplyai-output/",
     candidateProfile: {
       firstName: "f_name",
       lastName: "l_name",
@@ -62,7 +62,7 @@ function runTests() {
     customerId: "customer_fname_lname_testu",
     aiProvider: "gemini",
     geminiApiKey: "AIzaSyTest",
-    outputDir: "/Users/bstar/Downloads/resume_backup/",
+    outputDir: "/tmp/autoapplyai-output/",
     candidateProfile: {
       firstName: "f_name",
       lastName: "l_name",

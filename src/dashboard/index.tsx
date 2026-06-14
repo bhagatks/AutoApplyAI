@@ -5,7 +5,7 @@ import '../sidepanel/style.css';
 import { initSentry } from '../shared/sentry';
 import { ErrorBoundary } from '@sentry/react';
 
-initSentry('dashboard');
+void initSentry('dashboard');
 
 // Gracefully handle uncaught promise rejections, specifically Firebase offline/network errors
 window.addEventListener('unhandledrejection', (event) => {

@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { User, Mail, Phone, Key, Folder, FileText, Sparkles, Upload, LogOut, CheckCircle, HelpCircle, Square } from 'lucide-react';
+import { User, Mail, Phone, Key, FileText, Sparkles, Upload, LogOut, CheckCircle, HelpCircle, Square } from 'lucide-react';
 import { CustomerConfig } from '../../shared/types';
-import { saveCustomerConfig, getUserCompetencyProfile, saveUserCompetencyProfile, getUserSkillProfile, saveUserSkillProfile, prepareFirestoreAccess } from '../../shared/db';
+import { saveUserData, getUserCompetencyProfile, saveUserCompetencyProfile, getUserSkillProfile, saveUserSkillProfile, prepareFirestoreAccess } from '../../shared/db';
 import { mergeCompetenciesForUser, MAX_USER_CUSTOM_COMPETENCIES, getBundledCoreCompetencyCatalog } from '../../shared/competency-catalog';
 import { mergeSkillsForUser, MAX_USER_CUSTOM_SKILLS, getBundledCoreSkillCatalog } from '../../shared/skill-catalog';
 import { formatAiErrorToast, getAiErrorToastVariant } from '../../shared/ai-errors';
@@ -10,7 +10,6 @@ import {
   parseResumeWithAI,
   extractResumeDocumentText,
   saveResumeToDirectory,
-  ensureDirectoryWriteAccess,
   fetchAvailableModels,
   prefetchAllProviderModels,
   getProviderSelectLabel,
@@ -41,13 +40,6 @@ import {
 } from './onboarding-validation';
 import { ToastStack, useToast } from '../../shared/Toast';
 import BrandLockup from '../../shared/BrandLockup';
-import { loadOutputDirHandle, saveOutputDirHandle } from '../../shared/artifacts';
-import {
-  OUTPUT_DIR_PICKED_ACTION,
-  openDirectoryPickerTab,
-  requestDirectoryHandle,
-  directoryPickerFailureMessage,
-} from '../../shared/directory-picker';
 import {
   loadOnboardingDraftApiKeys,
   loadOnboardingDraftProvider,
@@ -64,6 +56,8 @@ import {
   ONBOARDING_DEV_REMINDER,
 } from '../../dev/onboardingDevKeys';
 import { ReportProblemIconButton } from './ReportProblemModal';
+import OutputDirectoryField from './OutputDirectoryField';
+import { useOutputDirectory } from '../hooks/useOutputDirectory';
 
 interface MicroOnboardingProps {
   userId: string;
@@ -98,9 +92,7 @@ export default function MicroOnboarding({ userId, onComplete, onSignOut, onOpenR
   const [geminiApiKey, setGeminiApiKey] = useState(() => 
     initialConfig?.geminiApiKey || ''
   );
-  const [outputDir, setOutputDir] = useState(() => 
-    initialConfig?.outputDir || ''
-  );
+  const outputDirectory = useOutputDirectory();
   const [resumeContext, setResumeContext] = useState(() =>
     initialConfig?.resumeContext || ''
   );
@@ -120,7 +112,6 @@ export default function MicroOnboarding({ userId, onComplete, onSignOut, onOpenR
   const [isVerifyingKey, setIsVerifyingKey] = useState(false);
   const [isScanningResume, setIsScanningResume] = useState(false);
   const [uploadedFile, setUploadedFile] = useState<File | null>(null);
-  const [dirHandle, setDirHandle] = useState<any>(null);
   const [showTooltip, setShowTooltip] = useState(false);
   const [providerModels, setProviderModels] = useState<Record<AiProvider, string[]>>(DEFAULT_PROVIDER_MODELS);
   const activeModel = resolveProviderModel(aiProvider, providerModels[aiProvider]);
@@ -197,6 +188,19 @@ export default function MicroOnboarding({ userId, onComplete, onSignOut, onOpenR
   const devInjectActive = isOnboardingDevInjectEnabled();
   const { toasts, showToast, dismissToast } = useToast();
 
+  const handlePickOutputDirectory = async () => {
+    try {
+      const picked = await outputDirectory.pick();
+      if (!picked) return;
+      showToast(`Output folder set to "${picked}"`, 'success');
+    } catch (err) {
+      showToast(
+        err instanceof Error ? err.message : 'Could not select the output folder.',
+        'warning'
+      );
+    }
+  };
+
   // DEV ONLY: auto-fill API key from gitignored `.env.local` (remove before release)
   useEffect(() => {
     if (!devInjectActive) return;
@@ -220,6 +224,20 @@ export default function MicroOnboarding({ userId, onComplete, onSignOut, onOpenR
       cancelled = true;
     };
   }, [aiProvider, devInjectActive]);
+
+  const outputDirLabel = outputDirectory.label;
+  const outputDirReadyRef = useRef(false);
+  const previousOutputDirRef = useRef('');
+
+  useEffect(() => {
+    if (!outputDirectory.isReady) return;
+    const next = outputDirectory.label;
+    if (outputDirReadyRef.current && next && next !== previousOutputDirRef.current) {
+      showToast(`Output folder set to "${next}"`, 'success');
+    }
+    previousOutputDirRef.current = next;
+    outputDirReadyRef.current = true;
+  }, [outputDirectory.label, outputDirectory.isReady, showToast]);
 
   // Prefetch latest models for all providers before showing onboarding
   useEffect(() => {
@@ -278,7 +296,6 @@ export default function MicroOnboarding({ userId, onComplete, onSignOut, onOpenR
         setSavedResumeName(initialConfig.parsedResume.sourceFilePath || initialConfig.candidateProfile?.resume || '');
       }
       setGeminiApiKey(initialConfig.geminiApiKey || '');
-      setOutputDir(initialConfig.outputDir || '');
       setResumeContext(initialConfig.resumeContext || '');
       setUseAiParsing(initialConfig.useAiParsing ?? true);
       setIsKeyVerified(!!initialConfig.geminiApiKey);
@@ -288,36 +305,6 @@ export default function MicroOnboarding({ userId, onComplete, onSignOut, onOpenR
       if (initialProfile.email) setEmail(initialProfile.email);
     }
   }, [initialConfig, initialProfile]);
-
-  useEffect(() => {
-    let cancelled = false;
-    loadOutputDirHandle().then((handle) => {
-      if (cancelled || !handle?.name) return;
-      setDirHandle(handle);
-      setOutputDir((prev) => prev || handle.name);
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-
-  useEffect(() => {
-    if (typeof chrome === 'undefined' || !chrome.runtime?.onMessage) return;
-
-    const onMessage = (message: { action?: string; name?: string }) => {
-      if (message.action !== OUTPUT_DIR_PICKED_ACTION || !message.name) return;
-      setOutputDir(message.name);
-      void loadOutputDirHandle().then((handle) => {
-        if (handle) setDirHandle(handle);
-      });
-      showToast(`Output folder set to "${message.name}"`, 'success');
-    };
-
-    chrome.runtime.onMessage.addListener(onMessage);
-    return () => {
-      chrome.runtime.onMessage.removeListener(onMessage);
-    };
-  }, [showToast]);
 
   const applyDraftApiKey = async (provider: AiProvider, options?: { markVerified?: boolean }) => {
     const drafts = await loadOnboardingDraftApiKeys();
@@ -350,7 +337,6 @@ export default function MicroOnboarding({ userId, onComplete, onSignOut, onOpenR
               if (config) {
                 setAiProvider(config.aiProvider || 'gemini');
                 setGeminiApiKey(config.geminiApiKey || '');
-                setOutputDir(config.outputDir || '');
                 setResumeContext(config.resumeContext || '');
                 setUseAiParsing(config.useAiParsing ?? true);
                 setIsKeyVerified(!!config.geminiApiKey);
@@ -386,7 +372,6 @@ export default function MicroOnboarding({ userId, onComplete, onSignOut, onOpenR
             if (config) {
               setAiProvider(config.aiProvider || 'gemini');
               setGeminiApiKey(config.geminiApiKey || '');
-              setOutputDir(config.outputDir || '');
               setResumeContext(config.resumeContext || '');
               setUseAiParsing(config.useAiParsing ?? true);
               setIsKeyVerified(!!config.geminiApiKey);
@@ -505,34 +490,6 @@ export default function MicroOnboarding({ userId, onComplete, onSignOut, onOpenR
     });
   };
 
-  const applyPickedOutputDirectory = async (handle: FileSystemDirectoryHandle, name: string) => {
-    const granted = await ensureDirectoryWriteAccess(handle);
-    if (!granted) {
-      showToast('Write access to the folder is required. Please allow access and try again.', 'warning');
-      return;
-    }
-
-    setDirHandle(handle);
-    setOutputDir(name);
-    await saveOutputDirHandle(handle);
-    showToast(`Output folder set to "${name}"`, 'success');
-  };
-
-  const pickOutputDirectory = async () => {
-    const result = await requestDirectoryHandle();
-    if (!result.ok) {
-      const message = directoryPickerFailureMessage(result.reason);
-      if (message) showToast(message, 'warning');
-      if (result.reason === 'unsupported') {
-        showToast('Opening folder picker in a new tab…', 'info');
-        await openDirectoryPickerTab();
-      }
-      return;
-    }
-
-    await applyPickedOutputDirectory(result.handle, result.name);
-  };
-
   const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files[0]) {
       const file = e.target.files[0];
@@ -541,7 +498,13 @@ export default function MicroOnboarding({ userId, onComplete, onSignOut, onOpenR
         showToast('Please select a PDF, Word (.docx), or plain text (.txt) file.', 'warning');
         return;
       }
-      if (!outputDir.trim()) {
+      if (!outputDirLabel.trim()) {
+        showToast('Choose an output directory before uploading your resume.', 'warning');
+        return;
+      }
+
+      const dirHandle = await outputDirectory.ensureHandle();
+      if (!dirHandle) {
         showToast('Choose an output directory before uploading your resume.', 'warning');
         return;
       }
@@ -559,23 +522,34 @@ export default function MicroOnboarding({ userId, onComplete, onSignOut, onOpenR
 
       let savedResumeNameLocal: string | undefined;
 
-      // Save while the file-picker user gesture is still active (before long AI work)
-      try {
-        setScanStatus('Saving resume to output directory...');
-        savedResumeNameLocal = await saveResumeToDirectory(dirHandle, file, 'base_resume');
-        throwIfScanCancelled();
-        if (savedResumeNameLocal) {
-          setSavedResumeName(savedResumeNameLocal);
-          setResumeFile(savedResumeNameLocal);
-        }
-      } catch (saveErr) {
-        console.warn('Resume save deferred:', saveErr);
+      const writableDir = dirHandle as FileSystemDirectoryHandle & {
+        queryPermission(descriptor: { mode: 'readwrite' }): Promise<PermissionState>;
+      };
+      const permissionStatus = await writableDir.queryPermission({ mode: 'readwrite' });
+
+      if (permissionStatus !== 'granted') {
         showToast(
-          saveErr instanceof Error
-            ? saveErr.message
-            : 'Could not save resume to folder yet. It will be saved when you complete onboarding.',
-          'warning'
+          'Resume staged in memory. It will save to your output folder when you click Get Started, or after you re-select your output folder to restore folder access.',
+          'info'
         );
+      } else {
+        try {
+          setScanStatus('Saving resume to output directory...');
+          savedResumeNameLocal = await saveResumeToDirectory(dirHandle, file, 'base_resume');
+          throwIfScanCancelled();
+          if (savedResumeNameLocal) {
+            setSavedResumeName(savedResumeNameLocal);
+            setResumeFile(savedResumeNameLocal);
+          }
+        } catch (saveErr) {
+          console.warn('Resume save deferred:', saveErr);
+          showToast(
+            saveErr instanceof Error
+              ? saveErr.message
+              : 'Could not save resume to folder yet. It will be saved when you complete onboarding.',
+            'warning'
+          );
+        }
       }
 
       setScanStatus('Extracting text from document...');
@@ -708,7 +682,7 @@ export default function MicroOnboarding({ userId, onComplete, onSignOut, onOpenR
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
-    if (!firstName.trim() || !lastName.trim() || !email.trim() || !phone.trim() || !geminiApiKey.trim() || !outputDir.trim() || !resumeFile) {
+    if (!firstName.trim() || !lastName.trim() || !email.trim() || !phone.trim() || !geminiApiKey.trim() || !outputDirLabel.trim() || !resumeFile) {
       showToast('Please complete all required fields, including resume upload.', 'warning');
       return;
     }
@@ -750,7 +724,7 @@ export default function MicroOnboarding({ userId, onComplete, onSignOut, onOpenR
       sourceFilePath: savedResumeName || resumeFile,
     });
 
-    const rulesJson = JSON.stringify(buildResumeRulesForCustomer(outputDir.trim()));
+    const rulesJson = JSON.stringify(buildResumeRulesForCustomer(outputDirLabel.trim()));
 
     const customerConfig: CustomerConfig = {
       customerId,
@@ -758,7 +732,7 @@ export default function MicroOnboarding({ userId, onComplete, onSignOut, onOpenR
       aiModel: activeModel,
       useAiParsing,
       geminiApiKey: geminiApiKey.trim(),
-      outputDir: outputDir.trim(),
+      outputDir: outputDirLabel.trim(),
       resumeContext: resumeContext.trim() || undefined,
       candidateProfile: {
         firstName: firstName.trim(),
@@ -771,6 +745,7 @@ export default function MicroOnboarding({ userId, onComplete, onSignOut, onOpenR
     };
 
     try {
+      const dirHandle = await outputDirectory.ensureHandle();
       if (dirHandle && uploadedFile) {
         await saveResumeToDirectory(dirHandle, uploadedFile, 'base_resume');
       }
@@ -794,7 +769,7 @@ export default function MicroOnboarding({ userId, onComplete, onSignOut, onOpenR
 
       // 2. Sync to cloud (Firestore)
       if (userId) {
-        await saveCustomerConfig(userId, customerConfig);
+        await saveUserData(userId, customerConfig);
 
         try {
           await prepareFirestoreAccess(userId);
@@ -876,7 +851,7 @@ export default function MicroOnboarding({ userId, onComplete, onSignOut, onOpenR
     email.trim() &&
     phone.trim() &&
     geminiApiKey.trim() &&
-    outputDir.trim() &&
+    outputDirLabel.trim() &&
     resumeFile &&
     isKeyVerified &&
     profileUnlocked &&
@@ -887,7 +862,7 @@ export default function MicroOnboarding({ userId, onComplete, onSignOut, onOpenR
     validateOnboardingForm({
       geminiApiKey,
       isKeyVerified,
-      outputDir,
+      outputDir: outputDirLabel,
       resumeFile,
       isScanningResume,
       profileUnlocked,
@@ -1245,41 +1220,13 @@ export default function MicroOnboarding({ userId, onComplete, onSignOut, onOpenR
           </div>
 
           {/* Step 3: Output Directory Selection */}
-          <div className={fieldGroupClass(invalidFields, 'outputDir')} data-field-key="outputDir">
-            <label style={fieldLabelStyle(invalidFields, 'outputDir', { display: 'flex', alignItems: 'center', gap: 6, fontSize: '0.78rem', fontWeight: 600, color: 'var(--text-secondary)' })}>
-              <Folder size={12} style={{ color: 'var(--brand-color)' }} /> Output Directory *
-            </label>
-            <div style={{ display: 'flex', gap: 8 }}>
-              <input
-                type="text"
-                className={fieldControlClass(invalidFields, 'outputDir')}
-                data-field-key="outputDir"
-                value={outputDir}
-                placeholder="Select local target directory..."
-                readOnly
-                onClick={() => {
-                  clearInvalidField('outputDir');
-                  void pickOutputDirectory();
-                }}
-                required
-                style={{ flex: 1, cursor: 'pointer' }}
-              />
-              <button
-                type="button"
-                className="btn"
-                onClick={() => {
-                  clearInvalidField('outputDir');
-                  void pickOutputDirectory();
-                }}
-                style={{ padding: '0 12px', whiteSpace: 'nowrap', fontSize: '0.8rem' }}
-              >
-                Choose...
-              </button>
-            </div>
-            <small style={{ color: 'var(--text-muted)', fontSize: '0.7rem', marginTop: 4, display: 'block' }}>
-              Select where tailored resumes will be saved
-            </small>
-          </div>
+          <OutputDirectoryField
+            label={outputDirLabel}
+            isPicking={outputDirectory.isPicking}
+            invalidFields={invalidFields}
+            onPick={handlePickOutputDirectory}
+            onClearInvalid={() => clearInvalidField('outputDir')}
+          />
 
           {/* Resume builder note — page count chosen by engine at tailor time */}
           {computeExperienceYears(experience) > 10 && (
@@ -1308,7 +1255,7 @@ export default function MicroOnboarding({ userId, onComplete, onSignOut, onOpenR
           </div>
 
           {/* Step 4: Resume PDF/Word Upload - Enabled when API key verified and output dir chosen */}
-          <div className={fieldGroupClass(invalidFields, 'resumeFile')} data-field-key="resumeFile" style={{ opacity: isKeyVerified && outputDir.trim() ? 1 : 0.5 }}>
+          <div className={fieldGroupClass(invalidFields, 'resumeFile')} data-field-key="resumeFile" style={{ opacity: isKeyVerified && outputDirLabel.trim() ? 1 : 0.5 }}>
             <label style={fieldLabelStyle(invalidFields, 'resumeFile', { display: 'flex', alignItems: 'center', gap: 6, fontSize: '0.78rem', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: 6 })}>
               <FileText size={12} style={{ color: 'var(--brand-color)' }} /> Resume Document (PDF / DOCX) *
             </label>
@@ -1323,14 +1270,14 @@ export default function MicroOnboarding({ userId, onComplete, onSignOut, onOpenR
                 borderRadius: 8,
                 border: '1px solid var(--panel-border)',
                 background: 'var(--panel-bg)',
-                cursor: isKeyVerified && outputDir.trim() && !isScanningResume ? 'pointer' : 'not-allowed',
-                opacity: isKeyVerified && outputDir.trim() ? 1 : 0.6,
+                cursor: isKeyVerified && outputDirLabel.trim() && !isScanningResume ? 'pointer' : 'not-allowed',
+                opacity: isKeyVerified && outputDirLabel.trim() ? 1 : 0.6,
               }}
             >
               <input
                 type="checkbox"
                 checked={useAiParsing}
-                disabled={!isKeyVerified || !outputDir.trim() || isScanningResume}
+                disabled={!isKeyVerified || !outputDirLabel.trim() || isScanningResume}
                 onChange={(e) => setUseAiParsing(e.target.checked)}
                 style={{ marginTop: 2, accentColor: 'var(--brand-color)' }}
               />
@@ -1354,14 +1301,14 @@ export default function MicroOnboarding({ userId, onComplete, onSignOut, onOpenR
               borderRadius: '8px',
               padding: '20px',
               background: isScanningResume ? 'rgba(255, 255, 255, 0.04)' : 'var(--panel-bg)',
-              cursor: isKeyVerified && outputDir.trim() && !isScanningResume ? 'pointer' : 'not-allowed',
+              cursor: isKeyVerified && outputDirLabel.trim() && !isScanningResume ? 'pointer' : 'not-allowed',
               transition: 'border-color 0.2s, background 0.2s',
             }}>
               <input
                 type="file"
                 accept=".pdf,.docx,.txt"
                 onChange={handleFileChange}
-                disabled={!isKeyVerified || !outputDir.trim() || isScanningResume}
+                disabled={!isKeyVerified || !outputDirLabel.trim() || isScanningResume}
                 style={{
                   position: 'absolute',
                   top: 0,
@@ -1369,7 +1316,7 @@ export default function MicroOnboarding({ userId, onComplete, onSignOut, onOpenR
                   width: '100%',
                   height: '100%',
                   opacity: 0,
-                  cursor: isKeyVerified && outputDir.trim() && !isScanningResume ? 'pointer' : 'not-allowed',
+                  cursor: isKeyVerified && outputDirLabel.trim() && !isScanningResume ? 'pointer' : 'not-allowed',
                   pointerEvents: isScanningResume ? 'none' : 'auto',
                 }}
               />
