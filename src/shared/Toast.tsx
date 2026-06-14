@@ -3,10 +3,16 @@ import { AlertCircle, CheckCircle, Info, X } from 'lucide-react';
 
 export type ToastVariant = 'success' | 'error' | 'warning' | 'info';
 
+export interface ToastAction {
+  label: string;
+  onClick: () => void;
+}
+
 export interface ToastItem {
   id: string;
   message: string;
   variant: ToastVariant;
+  action?: ToastAction;
 }
 
 const TOAST_DURATION_MS = 4500;
@@ -25,9 +31,13 @@ export function useToast() {
     setToasts((prev) => prev.filter((t) => t.id !== id));
   }, []);
 
-  const showToast = useCallback((message: string, variant: ToastVariant = 'info') => {
+  const showToast = useCallback((
+    message: string,
+    variant: ToastVariant = 'info',
+    action?: ToastAction
+  ) => {
     const id = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-    setToasts((prev) => [...prev, { id, message, variant }]);
+    setToasts((prev) => [...prev, { id, message, variant, action }]);
 
     window.setTimeout(() => {
       dismissToast(id);
@@ -53,6 +63,18 @@ export function ToastStack({ toasts, onDismiss }: ToastStackProps) {
           <div key={toast.id} className={`toast ${className}`}>
             <span className="toast-icon">{icon}</span>
             <span className="toast-message">{toast.message}</span>
+            {toast.action ? (
+              <button
+                type="button"
+                className="toast-action"
+                onClick={() => {
+                  toast.action?.onClick();
+                  onDismiss(toast.id);
+                }}
+              >
+                {toast.action.label}
+              </button>
+            ) : null}
             <button
               type="button"
               className="toast-dismiss"

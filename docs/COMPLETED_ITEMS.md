@@ -2,10 +2,11 @@
 
 Archive of finished setup tasks, features, and migrations. For open work see [ACTION_ITEMS.md](./ACTION_ITEMS.md).
 
-**Last updated:** 2026-06-13
+**Last updated:** 2026-06-14
 
 | Date | Item |
 |------|------|
+| 2026-06-14 | `bootstrapAiModelsConfig` — sidebar boot Firestore read for `aiModelsUpdate` governed by `dataRefresh.interval`; config bootstrap runs on every sidebar load even when user/job sync is deduped |
 | 2026-06-13 | Support report UI (`ReportProblemModal`) on Get Started + main home |
 | 2026-06-13 | Client EmailJS send path in `submitSupportReport` |
 | 2026-06-13 | `app-config-cache.ts` — launch fetch + TTL from `appConfig/dataRefresh` |

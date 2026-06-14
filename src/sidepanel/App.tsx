@@ -19,7 +19,8 @@ import {
 import { Job, ResumeRules, BaseProfile, CustomerConfig } from '../shared/types';
 import { normalizeName } from '../shared/utils';
 import { formatAiErrorToast } from '../shared/ai-errors';
-import { deleteJobFromDb, signInWithGoogleTokens, getUserProfile, auth, saveCloudApiKey, getCloudApiKey, saveUserData, getUserData, getJobsFromDb, prepareFirestoreAccess, bootstrapAppConfig, startAppConfigRefreshInterval, clearAppConfigCache } from '../shared/db';
+import { deleteJobFromDb, signInWithGoogleTokens, getUserProfile, auth, saveCloudApiKey, getCloudApiKey, saveUserData, getUserData, getJobsFromDb, prepareFirestoreAccess, bootstrapAppConfig, bootstrapAiModelsConfig, startAppConfigRefreshInterval, clearAppConfigCache } from '../shared/db';
+import { clearAiModelsCache, startAiModelsCacheListener } from '../shared/ai-models-cache';
 import { initSentry } from '../shared/sentry';
 import { encryptKey, decryptKey } from '../shared/crypto';
 import { onAuthStateChanged, signOut, User } from 'firebase/auth';
@@ -183,6 +184,7 @@ export default function App() {
   const bootCompletedRef = useRef(false);
   const cloudSyncUserIdRef = useRef<string | null>(null);
   const stopAppConfigRefreshRef = useRef<(() => void) | null>(null);
+  const stopAiModelsCacheRef = useRef<(() => void) | null>(null);
 
   const openSettings = () => {
     setDraftProfile({ ...candidateProfile });
@@ -255,16 +257,11 @@ export default function App() {
     }
   };
 
-  /** Single cloud sync path — one getUserData per auth session unless forced (Refresh). */
+  /** Single cloud sync path — config bootstrap runs every call; user/job fetch deduped per session unless forced. */
   const syncCloudSessionForUser = async (
     user: User,
     options?: { force?: boolean }
   ): Promise<CustomerConfig | null> => {
-    if (!options?.force && cloudSyncUserIdRef.current === user.uid) {
-      logDebug('Cloud sync already completed for this user session.');
-      return null;
-    }
-
     const authReady = await prepareFirestoreAccess(user.uid);
     if (!authReady) {
       logDebug('Firestore auth not ready. Skipping cloud sync.');
@@ -273,12 +270,23 @@ export default function App() {
 
     await setChromeLocal({ userId: user.uid });
     await bootstrapAppConfig(user.uid);
+    await bootstrapAiModelsConfig(user.uid);
     await initSentry('sidepanel', user.uid);
 
     if (stopAppConfigRefreshRef.current) {
       stopAppConfigRefreshRef.current();
     }
     stopAppConfigRefreshRef.current = startAppConfigRefreshInterval(user.uid);
+
+    if (stopAiModelsCacheRef.current) {
+      stopAiModelsCacheRef.current();
+    }
+    stopAiModelsCacheRef.current = startAiModelsCacheListener(user.uid);
+
+    if (!options?.force && cloudSyncUserIdRef.current === user.uid) {
+      logDebug('Cloud sync already completed for this user session — config refreshed, skipping user/job fetch.');
+      return null;
+    }
 
     const [cloudConfig, firestoreJobs] = await Promise.all([
       getUserData(user.uid),
@@ -338,6 +346,7 @@ export default function App() {
             }
             setCurrentUser(null);
             clearAppConfigCache();
+            clearAiModelsCache();
             cloudSyncUserIdRef.current = null;
             return;
           }
@@ -355,10 +364,15 @@ export default function App() {
           }
         } else {
           clearAppConfigCache();
+          clearAiModelsCache();
           cloudSyncUserIdRef.current = null;
           if (stopAppConfigRefreshRef.current) {
             stopAppConfigRefreshRef.current();
             stopAppConfigRefreshRef.current = null;
+          }
+          if (stopAiModelsCacheRef.current) {
+            stopAiModelsCacheRef.current();
+            stopAiModelsCacheRef.current = null;
           }
           removeChromeLocal('userId');
         }
@@ -382,6 +396,10 @@ export default function App() {
           stopAppConfigRefreshRef.current();
           stopAppConfigRefreshRef.current = null;
         }
+        if (stopAiModelsCacheRef.current) {
+          stopAiModelsCacheRef.current();
+          stopAiModelsCacheRef.current = null;
+        }
 
         if (user) {
           void syncCloudSessionForUser(user).catch((err) => {
@@ -389,6 +407,7 @@ export default function App() {
           });
         } else {
           clearAppConfigCache();
+          clearAiModelsCache();
           cloudSyncUserIdRef.current = null;
           removeChromeLocal('userId');
           if (isSigningOutRef.current) {
@@ -434,6 +453,7 @@ export default function App() {
     return () => {
       unsubAuth?.();
       if (stopAppConfigRefreshRef.current) stopAppConfigRefreshRef.current();
+      if (stopAiModelsCacheRef.current) stopAiModelsCacheRef.current();
       removeStorageListener();
     };
   }, []);
@@ -753,10 +773,15 @@ export default function App() {
     const tokenToClear = basicUserConfig?.token;
 
     clearAppConfigCache();
+    clearAiModelsCache();
     cloudSyncUserIdRef.current = null;
     if (stopAppConfigRefreshRef.current) {
       stopAppConfigRefreshRef.current();
       stopAppConfigRefreshRef.current = null;
+    }
+    if (stopAiModelsCacheRef.current) {
+      stopAiModelsCacheRef.current();
+      stopAiModelsCacheRef.current = null;
     }
 
     // Reset React state immediately

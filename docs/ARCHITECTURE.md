@@ -58,7 +58,7 @@ src/
     ├── resume-types.ts  # Parsed resume contracts, Zod validation, quality analysis
     ├── resume-dates.ts  # Date string normalization
     ├── pipeline-storage.ts
-    ├── output-directory.ts  # Output folder pick/load/commit (IndexedDB + chrome.storage)
+    ├── downloads.ts       # chrome.downloads export helpers (`Downloads/AutoApplyAI/…`)
     └── types.ts         # Job, CustomerConfig, ResumeRules, etc.
 ```
 
@@ -95,5 +95,5 @@ npm run test:flow
 | 2026-06-13 | Sentry init reads `appConfig/sentry` (`dsn`, `enabled`) via cache; falls back to `VITE_SENTRY_DSN` / `VITE_SENTRY_ENABLED` when Firestore unavailable |
 | 2026-06-13 | `app-config-manager.ts` — unified dev/prod routing (`getFirestorePath`), `getLLMCredentials()`, `resolveMonitoringConfig()`; dashboard boot uses `waitForAuthGateway()` |
 | 2026-06-13 | User Firestore paths: removed `config` subcollection; `customerConfig` → `userData/userData`; sibling docs under `userData/*` (existing user data wiped manually) |
-| 2026-06-14 | Pipeline log storm fix: sidepanel tailoring poll no longer re-fires on every `jobs` refresh; high-frequency runtime actions omitted from MSG console traces |
+| 2026-06-14 | `ai-models-cache.ts` — reads `aiModelsUpdate` from `appConfig/dataRefresh.aiModelsUpdate` (flat) or `appConfig/appConfig.dataRefresh.aiModelsUpdate` (nested); re-read TTL from `dataRefresh.interval` (mins) |
 | 2026-06-13 | Admin `inspect-mail-queue.ts` + `npm run inspect:mail` — reads namespaced mail collection (`FIRESTORE_ENV` selects `dev` vs `prod`) |

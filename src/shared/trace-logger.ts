@@ -15,6 +15,21 @@ export type TraceLevel = 'debug' | 'info' | 'warn' | 'error';
 
 export type TraceSurface = 'background' | 'sidepanel' | 'content' | 'dashboard' | 'unknown';
 
+/** Flat key=value string for DevTools console (avoids collapsed Object blobs). */
+export function configDiagMessage(parts: Record<string, unknown>): string {
+  return Object.entries(parts)
+    .map(([key, value]) => {
+      const rendered =
+        value === null || value === undefined
+          ? String(value)
+          : typeof value === 'object'
+            ? JSON.stringify(value)
+            : String(value);
+      return `${key}=${rendered}`;
+    })
+    .join(' | ');
+}
+
 export interface TraceEntry {
   id: string;
   ts: string;

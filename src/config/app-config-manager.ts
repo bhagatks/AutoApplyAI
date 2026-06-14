@@ -2,7 +2,8 @@
  * Unified configuration manager — single-Firebase-project dev/prod isolation.
  * Re-exports Firestore path helpers; resolves LLM credentials and monitoring config.
  */
-import type { AiProvider } from '../shared/ai';
+import type { AiProvider } from '../shared/ai-provider-catalog';
+import type { CustomerConfig } from '../shared/types';
 import {
   getSentryConfigFromEnv,
   resolveSentryConfig,
@@ -50,12 +51,24 @@ async function getProdLLMCredentials(provider: AiProvider): Promise<string> {
     typeof stored[providerKey] === 'string' ? (stored[providerKey] as string).trim() : '';
   if (fromProviderKey) return fromProviderKey;
 
-  const legacy =
-    typeof stored.geminiApiKey === 'string' ? (stored.geminiApiKey as string).trim() : '';
-  if (legacy) return legacy;
+  const config = stored.customer_config as CustomerConfig | undefined;
+  const configKey = config?.geminiApiKey?.trim() || '';
+  // Legacy field name — holds the key for whichever provider the user selected.
+  if (configKey && config?.aiProvider === provider) {
+    return configKey;
+  }
 
-  const config = stored.customer_config as { geminiApiKey?: string } | undefined;
-  return config?.geminiApiKey?.trim() || '';
+  if (provider === 'gemini') {
+    const legacy =
+      typeof stored.geminiApiKey === 'string' ? (stored.geminiApiKey as string).trim() : '';
+    if (legacy) return legacy;
+    // Pre-multi-provider configs only stored geminiApiKey without aiProvider.
+    if (configKey && !config?.aiProvider) {
+      return configKey;
+    }
+  }
+
+  return '';
 }
 
 /**

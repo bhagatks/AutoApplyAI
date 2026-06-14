@@ -6,7 +6,6 @@ export type OnboardingFieldKey = string;
 export interface OnboardingValidationInput {
   geminiApiKey: string;
   isKeyVerified: boolean;
-  outputDir: string;
   resumeFile: string;
   isScanningResume: boolean;
   profileUnlocked: boolean;
@@ -33,7 +32,6 @@ export function validateOnboardingForm(input: OnboardingValidationInput): Onboar
   const {
     geminiApiKey,
     isKeyVerified,
-    outputDir,
     resumeFile,
     isScanningResume,
     profileUnlocked,
@@ -48,10 +46,6 @@ export function validateOnboardingForm(input: OnboardingValidationInput): Onboar
     push(keys, messages, 'apiKey', 'Enter your AI API key');
   } else if (!isKeyVerified) {
     push(keys, messages, 'apiKeyNotVerified', 'Verify your API key');
-  }
-
-  if (!outputDir.trim()) {
-    push(keys, messages, 'outputDir', 'Choose an output folder for tailored resumes');
   }
 
   if (!resumeFile) {
