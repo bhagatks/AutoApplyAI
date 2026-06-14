@@ -19,6 +19,7 @@ import {
   isScanCancelledError,
 } from '../../shared/ai';
 import { parseResumeFile } from '../../parser';
+import { mapNormalizedResumeToFormState } from '../../parser/utils/schemaMapper';
 import {
   WorkExperience,
   emptyWorkExperience,
@@ -28,6 +29,7 @@ import {
   isParsedResumeComplete,
   parsedResumeToBaseProfile,
   resetParsedResumeForm,
+  type ParsedResume,
 } from '../../shared/resume-types';
 import ResumeProfileSections from './ResumeProfileSections';
 import {
@@ -417,62 +419,64 @@ export default function MicroOnboarding({ userId, onComplete, onSignOut, onOpenR
     }
   };
 
-  const populateFromScan = (parsed: Partial<import('../../shared/resume-types').ParsedResume>) => {
-    applyParsedResumeToForm(parsed, {
-      setFirstName,
-      setLastName,
-      setEmail,
-      setPhone,
-      setCity,
-      setState: setStateVal,
-      setCountry,
-      setPostalCode,
-      setRole,
-      setSummary,
-      setCompetencies,
-      setSkills,
-      setExperience,
-      setEducation,
-      setCurrentCompany,
-      setCurrentlyWorking,
-      setLinkedin,
-      setGithub,
-      setPortfolio,
-      setWebsite,
-      setOtherLinks,
-      setLanguages,
-      setWorkAuthorizationUS,
-      setRequiresSponsorship,
-    });
+  const scanFormSetters = {
+    setFirstName,
+    setLastName,
+    setEmail,
+    setPhone,
+    setCity,
+    setState: setStateVal,
+    setCountry,
+    setPostalCode,
+    setRole,
+    setSummary,
+    setCompetencies,
+    setSkills,
+    setExperience,
+    setEducation,
+    setCurrentCompany,
+    setCurrentlyWorking,
+    setLinkedin,
+    setGithub,
+    setPortfolio,
+    setWebsite,
+    setOtherLinks,
+    setLanguages,
+    setWorkAuthorizationUS,
+    setRequiresSponsorship,
+  };
+
+  const populateFromScan = (parsed: Partial<ParsedResume>) => {
+    applyParsedResumeToForm(parsed, scanFormSetters);
+  };
+
+  const populateFromMappedScan = (
+    formReadyState: ReturnType<typeof mapNormalizedResumeToFormState>,
+    overrides?: Partial<ParsedResume>
+  ) => {
+    const { resumeFile, otherLinks, languages, ...profileFields } = formReadyState;
+    applyParsedResumeToForm(
+      {
+        ...profileFields,
+        otherLinks: otherLinks
+          .split('\n')
+          .map((link) => link.trim())
+          .filter(Boolean),
+        languages: languages
+          .split(',')
+          .map((lang) => lang.trim())
+          .filter(Boolean),
+        sourceFileName: resumeFile,
+        sourceFilePath: formReadyState.sourceFilePath,
+        scannedAt: formReadyState.scannedAt,
+        ...overrides,
+      },
+      scanFormSetters
+    );
   };
 
   const clearScanFormFields = () => {
-    resetParsedResumeForm({
-      setFirstName,
-      setLastName,
-      setEmail,
-      setPhone,
-      setCity,
-      setState: setStateVal,
-      setCountry,
-      setPostalCode,
-      setRole,
-      setSummary,
-      setCompetencies,
-      setSkills,
-      setExperience,
-      setEducation,
-      setCurrentCompany,
-      setCurrentlyWorking,
-      setLinkedin,
-      setGithub,
-      setPortfolio,
-      setWebsite,
-      setOtherLinks,
-      setLanguages,
-      setWorkAuthorizationUS,
-      setRequiresSponsorship,
-    });
+    resetParsedResumeForm(scanFormSetters);
   };
 
   const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -522,7 +526,9 @@ export default function MicroOnboarding({ userId, onComplete, onSignOut, onOpenR
           onStatus: setScanStatus,
         });
         throwIfScanCancelled();
-        const parsed = scanResult.resume;
+        const formReadyState = mapNormalizedResumeToFormState(scanResult.resume);
+        const scannedCompetencies = formReadyState.competencies.filter((competency) => competency.trim());
+        const scannedSkills = formReadyState.skills;
 
         for (const warning of scanResult.warnings) {
           showToast(warning, scanResult.quality === 'full' ? 'info' : 'warning');
@@ -537,7 +543,7 @@ export default function MicroOnboarding({ userId, onComplete, onSignOut, onOpenR
         const mergeResult = mergeCompetenciesForUser(
           globalCatalog,
           userProfile,
-          parsed.competencies || [],
+          scannedCompetencies,
           'scan'
         );
         await saveUserCompetencyProfile(userId, mergeResult.profile, { requireFirestore: true });
@@ -550,22 +556,23 @@ export default function MicroOnboarding({ userId, onComplete, onSignOut, onOpenR
         const skillMergeResult = mergeSkillsForUser(
           globalSkillCatalog,
           userSkillProfile,
-          parsed.skills || [],
+          scannedSkills,
           'scan'
         );
         await saveUserSkillProfile(userId, skillMergeResult.profile, { requireFirestore: true });
         throwIfScanCancelled();
 
-        populateFromScan({
-          ...parsed,
+        populateFromMappedScan(formReadyState, {
           competencies:
             mergeResult.profileCompetencies.length > 0
               ? mergeResult.profileCompetencies
-              : parsed.competencies,
+              : scannedCompetencies.length > 0
+                ? scannedCompetencies
+                : formReadyState.competencies,
           skills:
             skillMergeResult.profileSkills.length > 0
               ? skillMergeResult.profileSkills
-              : parsed.skills || [],
+              : scannedSkills,
         });
 
         if (mergeResult.addedCustomCount > 0) {
