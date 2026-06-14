@@ -51,7 +51,7 @@ Local files (on demand): PDF, DOCX, .tex, cover letter files
 
 | Collection | Path |
 |------------|------|
-| Customer config | `users/{uid}/config/customerConfig` |
+| User data (profile, AI settings, parsed resume) | `users/{uid}/userData/userData` |
 | Job (mirror) | `users/{uid}/jobs/{jobId}` |
 | Tailored snapshot | `users/{uid}/resumes/{resumeId}` |
 

@@ -14,6 +14,7 @@
   "externally_connectable": {
     "matches": [
       "https://autoapplyai-3e61d.web.app/*",
+    "https://autoapplyai-3e61d.firebaseapp.com/*",
       "http://localhost:5173/*",
       "http://localhost:3000/*"
     ]

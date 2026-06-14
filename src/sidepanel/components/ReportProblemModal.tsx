@@ -76,7 +76,7 @@ export default function ReportProblemModal({
 
     setSubmitting(true);
     try {
-      await submitSupportReport(
+      const { mailId, subject } = await submitSupportReport(
         userId,
         {
           category,
@@ -88,7 +88,7 @@ export default function ReportProblemModal({
         },
         context
       );
-      showToast('Report queued. Support will be notified by email once delivery is configured.', 'success');
+      showToast(`Report sent (mail/${mailId}). Subject: ${subject}`, 'success');
       onClose();
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Could not submit report.';

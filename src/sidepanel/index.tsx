@@ -5,7 +5,7 @@ import { initSentry } from '../shared/sentry';
 import { setTraceSurface } from '../shared/trace-logger';
 import { ErrorBoundary } from '@sentry/react';
 
-initSentry('sidepanel');
+void initSentry('sidepanel');
 setTraceSurface('sidepanel');
 
 document.documentElement.classList.add('sidepanel-root');

@@ -3,6 +3,10 @@
 
 import { pickAdapter } from '../apply/adapters';
 import type { AssistApplyPayload } from '../apply/types';
+import {
+  OPEN_NATIVE_DIRECTORY_PICKER,
+  requestDirectoryHandle,
+} from '../shared/directory-picker';
 
 if (window.top !== window.self) {
   // Subframes skipped — avoid duplicate launchers in ATS iframes.
@@ -480,6 +484,32 @@ try {
       window.postMessage({ action: 'EXT_SIGNOUT' }, '*');
       sendResponse({ success: true });
       return;
+    }
+
+    if (message.action === OPEN_NATIVE_DIRECTORY_PICKER) {
+      if (window.top !== window.self) {
+        sendResponse({ success: false, folderName: null, reason: 'denied' });
+        return;
+      }
+
+      (async () => {
+        try {
+          const result = await requestDirectoryHandle();
+          if (!result.ok) {
+            sendResponse({ success: false, folderName: null, reason: result.reason });
+            return;
+          }
+          sendResponse({
+            success: true,
+            folderName: result.name,
+            handle: result.handle,
+          });
+        } catch (err) {
+          console.warn('AutoApplyAI: native directory picker failed:', err);
+          sendResponse({ success: false, folderName: null, reason: 'unsupported' });
+        }
+      })();
+      return true;
     }
   });
 } catch (err) {

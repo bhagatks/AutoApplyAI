@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   Settings,
   Plus,
@@ -19,8 +19,10 @@ import { Job, ResumeRules, BaseProfile, CustomerConfig } from '../shared/types';
 import { normalizeName } from '../shared/utils';
 import { formatAiErrorToast, getAiErrorToastVariant } from '../shared/ai-errors';
 import { executeTailorJob } from '../shared/tailor-job';
-import { subscribeToJobs, deleteJobFromDb, auth, saveCustomerConfig, getCustomerConfig, prepareFirestoreAccess } from '../shared/db';
+import { subscribeToJobs, deleteJobFromDb, auth, saveUserData, getUserData, prepareFirestoreAccess, bootstrapAppConfig } from '../shared/db';
 import { clearAllLocalAppData } from '../shared/storage';
+import { initSentry } from '../shared/sentry';
+import { waitForAuthGateway } from '../shared/auth-recovery';
 import { onAuthStateChanged, signOut, signInWithPopup, GoogleAuthProvider, User } from 'firebase/auth';
 import ExtensionSetupPrompt from './components/ExtensionSetupPrompt';
 import BrandWordmark from '../shared/BrandWordmark';
@@ -66,7 +68,7 @@ const DEFAULT_RULES: ResumeRules = {
     format_string: "\\footnotesize \\textbf{ATS STRATEGY MATCH TARGET:} 95\\%+ Optimization (Keywords: {keywords})"
   },
   file_naming: {
-    output_dir: "output"
+    output_dir: ""
   }
 };
 
@@ -102,9 +104,10 @@ export default function App() {
   const [jobDescription, setJobDescription] = useState('');
   const [isProcessing, setIsProcessing] = useState(false);
   const [activeTab, setActiveTab] = useState<'analysis' | 'resume' | 'cover' | 'preview'>('analysis');
-  const [authLoading, setAuthLoading] = useState(true);
-  const [configLoading, setConfigLoading] = useState(true);
+  const [bootstrapping, setBootstrapping] = useState(true);
   const [authLinkedType, setAuthLinkedType] = useState<'credentials' | 'config' | null>(null);
+  const cloudSyncUserIdRef = useRef<string | null>(null);
+  const bootCompletedRef = useRef(false);
 
   // Settings Modal State
   const [showSettings, setShowSettings] = useState(false);
@@ -126,6 +129,41 @@ export default function App() {
     </>
   );
 
+  const syncCloudSessionForUser = async (
+    user: User,
+    options?: { force?: boolean }
+  ): Promise<CustomerConfig | null> => {
+    if (!options?.force && cloudSyncUserIdRef.current === user.uid) {
+      return null;
+    }
+
+    const authReady = await prepareFirestoreAccess(user.uid);
+    if (!authReady) return null;
+
+    await bootstrapAppConfig(user.uid);
+    await initSentry('dashboard', user.uid);
+
+    const cloudConfig = await getUserData(user.uid);
+    if (cloudConfig) {
+      setCustomerConfig(cloudConfig);
+      setApiKey(cloudConfig.geminiApiKey);
+      localStorage.setItem('customer_config', JSON.stringify(cloudConfig));
+      localStorage.setItem('geminiApiKey', cloudConfig.geminiApiKey);
+      if (cloudConfig.candidateProfile) {
+        setCandidateProfile((prev) => ({
+          ...prev,
+          firstName: cloudConfig.candidateProfile.firstName,
+          lastName: cloudConfig.candidateProfile.lastName,
+          email: cloudConfig.candidateProfile.email,
+          phone: cloudConfig.candidateProfile.phone,
+        }));
+      }
+    }
+
+    cloudSyncUserIdRef.current = user.uid;
+    return cloudConfig;
+  };
+
   // Load Settings and History on init
   useEffect(() => {
     // 1. Fetch credentials, custom rules and candidate profile from local storage
@@ -139,20 +177,6 @@ export default function App() {
       try {
         const config = JSON.parse(localConfigStr);
         if (config && typeof config === 'object') {
-          const isComplete = !!(
-            config.customerId &&
-            config.geminiApiKey &&
-            config.outputDir &&
-            config.candidateProfile &&
-            config.candidateProfile.firstName &&
-            config.candidateProfile.lastName &&
-            config.candidateProfile.email &&
-            config.candidateProfile.phone &&
-            config.candidateProfile.resume
-          );
-          if (isComplete) {
-            setConfigLoading(false);
-          }
           setCustomerConfig(config);
           if (config.geminiApiKey) setApiKey(config.geminiApiKey);
           if (config.candidateProfile) {
@@ -189,12 +213,38 @@ export default function App() {
       } catch (e) { }
     }
 
-    // 2. Set up Firebase Authentication listener
     let unsubJobs: (() => void) | null = null;
+
+    const runBoot = async () => {
+      try {
+        const gateway = await waitForAuthGateway(auth);
+        setCurrentUser(gateway.user);
+
+        if (gateway.user) {
+          if (gateway.firestoreReady) {
+            unsubJobs = subscribeToJobs(gateway.user.uid, (syncedJobs) => {
+              setJobs(syncedJobs);
+            });
+            await syncCloudSessionForUser(gateway.user);
+          }
+        } else {
+          cloudSyncUserIdRef.current = null;
+        }
+      } catch (err) {
+        console.error('Dashboard boot failed:', err);
+      } finally {
+        bootCompletedRef.current = true;
+        setBootstrapping(false);
+      }
+    };
+
+    void runBoot();
+
     if (auth) {
       const unsubAuth = onAuthStateChanged(auth, (user) => {
+        if (!bootCompletedRef.current) return;
+
         setCurrentUser(user);
-        setAuthLoading(false);
 
         if (unsubJobs) {
           unsubJobs();
@@ -202,43 +252,14 @@ export default function App() {
         }
 
         if (user) {
-          const syncCloudData = async () => {
-            const authReady = await prepareFirestoreAccess(user.uid);
-            if (!authReady) {
-              setConfigLoading(false);
-              return;
-            }
-
-            unsubJobs = subscribeToJobs(user.uid, (syncedJobs) => {
-              setJobs(syncedJobs);
-            });
-            getCustomerConfig(user.uid).then((cloudConfig) => {
-              if (cloudConfig) {
-                setCustomerConfig(cloudConfig);
-                setApiKey(cloudConfig.geminiApiKey);
-                localStorage.setItem('customer_config', JSON.stringify(cloudConfig));
-                localStorage.setItem('geminiApiKey', cloudConfig.geminiApiKey);
-                if (cloudConfig.candidateProfile) {
-                  setCandidateProfile(prev => ({
-                    ...prev,
-                    firstName: cloudConfig.candidateProfile.firstName,
-                    lastName: cloudConfig.candidateProfile.lastName,
-                    email: cloudConfig.candidateProfile.email,
-                    phone: cloudConfig.candidateProfile.phone
-                  }));
-                }
-              }
-            }).catch((err) => {
-              console.error('Failed to get customer config from Firestore:', err);
-            }).finally(() => {
-              setConfigLoading(false);
-            });
-          };
-
-          syncCloudData();
+          unsubJobs = subscribeToJobs(user.uid, (syncedJobs) => {
+            setJobs(syncedJobs);
+          });
+          void syncCloudSessionForUser(user).catch((err) => {
+            console.error('Post-auth cloud sync failed:', err);
+          });
         } else {
-          setConfigLoading(false);
-          // Reload local history if signed out
+          cloudSyncUserIdRef.current = null;
           const savedHist = localStorage.getItem('localHistory');
           if (savedHist) {
             try {
@@ -263,10 +284,10 @@ export default function App() {
         unsubAuth();
         if (unsubJobs) unsubJobs();
       };
-    } else {
-      setAuthLoading(false);
-      setConfigLoading(false);
     }
+
+    setBootstrapping(false);
+    return undefined;
   }, []);
 
   // Sync selectedJob when history updates
@@ -384,7 +405,7 @@ export default function App() {
         setCustomerConfig(updatedConfig);
         localStorage.setItem('customer_config', JSON.stringify(updatedConfig));
         if (currentUser) {
-          await saveCustomerConfig(currentUser.uid, updatedConfig);
+          await saveUserData(currentUser.uid, updatedConfig);
         }
       }
 
@@ -719,7 +740,7 @@ export default function App() {
     );
   }
 
-  if (authLoading || configLoading) {
+  if (bootstrapping) {
     return withToasts(
       <div style={{ display: 'flex', flexDirection: 'column', height: '100vh', width: '100vw', justifyContent: 'center', alignItems: 'center', background: 'var(--bg-color)', color: 'var(--text-primary)' }}>
         <Loader className="animate-spin" size={40} style={{ color: 'var(--brand-color)', marginBottom: 16 }} />

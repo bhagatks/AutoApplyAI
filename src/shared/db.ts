@@ -1,10 +1,10 @@
 import { initializeApp, getApps, getApp } from 'firebase/app';
 import {
   initializeFirestore,
-  collection,
   doc,
   setDoc,
   addDoc,
+  updateDoc,
   getDoc,
   getDocs,
   deleteDoc,
@@ -12,6 +12,7 @@ import {
   query,
   orderBy,
   limit,
+  serverTimestamp,
   Firestore,
   Unsubscribe
 } from 'firebase/firestore';
@@ -34,6 +35,26 @@ import {
 } from './skill-catalog';
 import { stripUndefinedForFirestore } from './utils';
 import { traceAsync, traceLog } from './trace-logger';
+import {
+  getSupportMailAddress,
+} from './app-config-cache';
+import {
+  firestoreMailCollection,
+  firestoreMailDoc,
+  firestoreUserCollection,
+  firestoreUserDoc,
+  getFirestorePath,
+  USER_DATA_COLLECTION,
+  USER_DATA_DOC,
+} from '../config/firestore-paths';
+
+export type { SupportEmailConfig } from './app-config-cache';
+export {
+  bootstrapAppConfig,
+  clearAppConfigCache,
+  getSupportMailAddress,
+  startAppConfigRefreshInterval,
+} from './app-config-cache';
 
 const PERMISSION_DENIED_CODE = 'permission-denied';
 const FIRESTORE_AUTH_RETRY_DELAYS_MS = [400, 1200, 2500];
@@ -181,7 +202,7 @@ export async function prepareFirestoreAccess(userId: string): Promise<boolean> {
 export async function saveUserRules(userId: string, rules: ResumeRules): Promise<void> {
   if (!db) return;
   try {
-    const docRef = doc(db, 'users', userId, 'config', 'resumeRules');
+    const docRef = firestoreUserDoc(db, userId, USER_DATA_COLLECTION, 'resumeRules');
     await setDoc(docRef, rules);
   } catch (err) {
     console.error('Firestore saveUserRules failed:', err);
@@ -192,7 +213,7 @@ export async function saveUserRules(userId: string, rules: ResumeRules): Promise
 export async function getUserRules(userId: string): Promise<ResumeRules | null> {
   if (!db) return null;
   try {
-    const docRef = doc(db, 'users', userId, 'config', 'resumeRules');
+    const docRef = firestoreUserDoc(db, userId, USER_DATA_COLLECTION, 'resumeRules');
     const snap = await getDocWithAuth(docRef, userId);
     if (snap?.exists()) {
       return snap.data() as ResumeRules;
@@ -207,7 +228,7 @@ export async function getUserRules(userId: string): Promise<ResumeRules | null> 
 export async function saveUserProfile(userId: string, profile: BaseProfile): Promise<void> {
   if (!db) return;
   try {
-    const docRef = doc(db, 'users', userId, 'config', 'candidateProfile');
+    const docRef = firestoreUserDoc(db, userId, USER_DATA_COLLECTION, 'candidateProfile');
     await setDoc(docRef, profile);
   } catch (err: any) {
     if (err && (err.code === 'unavailable' || err.message?.includes('offline'))) {
@@ -222,7 +243,7 @@ export async function saveUserProfile(userId: string, profile: BaseProfile): Pro
 export async function getUserProfile(userId: string): Promise<BaseProfile | null> {
   if (!db) return null;
   try {
-    const docRef = doc(db, 'users', userId, 'config', 'candidateProfile');
+    const docRef = firestoreUserDoc(db, userId, USER_DATA_COLLECTION, 'candidateProfile');
     const snap = await getDocWithAuth(docRef, userId);
     if (snap?.exists()) {
       return snap.data() as BaseProfile;
@@ -249,7 +270,7 @@ export async function saveJobToDb(userId: string, job: Job): Promise<void> {
   }
   try {
     await tracedFirestore('saveJobToDb', userId, async () => {
-      const docRef = doc(db!, 'users', userId, 'jobs', job.id);
+      const docRef = firestoreUserDoc(db!, userId, 'jobs', job.id);
       await setDoc(docRef, stripUndefinedForFirestore(job));
     });
     traceLog.info('FIRESTORE', 'saveJobToDb', 'saved', { jobId: job.id, status: job.status });
@@ -265,11 +286,11 @@ export async function saveJobToDb(userId: string, job: Job): Promise<void> {
 export async function deleteJobFromDb(userId: string, jobId: string): Promise<void> {
   if (!db) return;
   try {
-    const jobRef = doc(db, 'users', userId, 'jobs', jobId);
+    const jobRef = firestoreUserDoc(db, userId, 'jobs', jobId);
     const snap = await getDocWithAuth(jobRef, userId);
     const resumeId = snap?.data()?.resumeId as string | undefined;
     if (resumeId) {
-      await deleteDoc(doc(db, 'users', userId, 'resumes', resumeId));
+      await deleteDoc(firestoreUserDoc(db, userId, 'resumes', resumeId));
     }
     await deleteDoc(jobRef);
   } catch (err: any) {
@@ -289,7 +310,7 @@ export async function saveTailoredResume(userId: string, resume: TailoredResume)
   }
   try {
     await tracedFirestore('saveTailoredResume', userId, async () => {
-      const docRef = doc(db!, 'users', userId, 'resumes', resume.id);
+      const docRef = firestoreUserDoc(db!, userId, 'resumes', resume.id);
       await setDoc(docRef, stripUndefinedForFirestore({ ...resume, updatedAt: new Date().toISOString() }));
     });
     traceLog.info('FIRESTORE', 'saveTailoredResume', 'saved', { resumeId: resume.id, jobId: resume.jobId });
@@ -305,7 +326,7 @@ export async function saveTailoredResume(userId: string, resume: TailoredResume)
 export async function getTailoredResume(userId: string, resumeId: string): Promise<TailoredResume | null> {
   if (!db) return null;
   try {
-    const docRef = doc(db, 'users', userId, 'resumes', resumeId);
+    const docRef = firestoreUserDoc(db, userId, 'resumes', resumeId);
     const snap = await getDocWithAuth(docRef, userId);
     if (snap?.exists()) {
       return snap.data() as TailoredResume;
@@ -319,7 +340,7 @@ export async function getTailoredResume(userId: string, resumeId: string): Promi
 export async function deleteTailoredResumeFromDb(userId: string, resumeId: string): Promise<void> {
   if (!db) return;
   try {
-    await deleteDoc(doc(db, 'users', userId, 'resumes', resumeId));
+    await deleteDoc(firestoreUserDoc(db, userId, 'resumes', resumeId));
   } catch (err: any) {
     logFirestoreAccessError('deleteTailoredResumeFromDb', err);
   }
@@ -333,7 +354,7 @@ export function subscribeToJobs(
 ): Unsubscribe | null {
   if (!db) return null;
   const q = query(
-    collection(db, 'users', userId, 'jobs'),
+    firestoreUserCollection(db, userId, 'jobs'),
     orderBy('date', 'desc'),
     limit(maxLimit)
   );
@@ -359,7 +380,7 @@ export async function getJobsFromDb(userId: string, maxLimit = 50): Promise<Job[
 
   try {
     const q = query(
-      collection(db, 'users', userId, 'jobs'),
+      firestoreUserCollection(db, userId, 'jobs'),
       orderBy('date', 'desc'),
       limit(maxLimit)
     );
@@ -379,7 +400,7 @@ export async function getJobsFromDb(userId: string, maxLimit = 50): Promise<Job[
 export async function saveCloudApiKey(userId: string, keyDoc: CloudApiKeyDoc | null): Promise<void> {
   if (!db) return;
   try {
-    const docRef = doc(db, 'users', userId, 'config', 'apiKey');
+    const docRef = firestoreUserDoc(db, userId, USER_DATA_COLLECTION, 'apiKey');
     if (keyDoc) {
       await setDoc(docRef, keyDoc);
     } else {
@@ -398,7 +419,7 @@ export async function saveCloudApiKey(userId: string, keyDoc: CloudApiKeyDoc | n
 export async function getCloudApiKey(userId: string): Promise<CloudApiKeyDoc | null> {
   if (!db) return null;
   try {
-    const docRef = doc(db, 'users', userId, 'config', 'apiKey');
+    const docRef = firestoreUserDoc(db, userId, USER_DATA_COLLECTION, 'apiKey');
     const snap = await getDocWithAuth(docRef, userId);
     if (snap?.exists()) {
       return snap.data() as CloudApiKeyDoc;
@@ -409,30 +430,29 @@ export async function getCloudApiKey(userId: string): Promise<CloudApiKeyDoc | n
   return null;
 }
 
-// Set or update customer config document
-export async function saveCustomerConfig(userId: string, config: CustomerConfig): Promise<void> {
+// Set or update user data document (onboarding profile, AI settings, parsed resume)
+export async function saveUserData(userId: string, config: CustomerConfig): Promise<void> {
   if (!db) {
-    traceLog.warn('FIRESTORE', 'saveCustomerConfig', 'db not initialized');
+    traceLog.warn('FIRESTORE', 'saveUserData', 'db not initialized');
     return;
   }
   try {
-    await tracedFirestore('saveCustomerConfig', userId, async () => {
-      const docRef = doc(db!, 'users', userId, 'config', 'customerConfig');
+    await tracedFirestore('saveUserData', userId, async () => {
+      const docRef = firestoreUserDoc(db!, userId, USER_DATA_COLLECTION, USER_DATA_DOC);
       await setDoc(docRef, stripUndefinedForFirestore(config));
     });
-    traceLog.info('FIRESTORE', 'saveCustomerConfig', 'saved', {
+    traceLog.info('FIRESTORE', 'saveUserData', 'saved', {
       aiProvider: config.aiProvider,
       hasParsedResume: !!config.parsedResume,
     });
   } catch (err: any) {
     if (err && (err.code === 'unavailable' || err.message?.includes('offline'))) {
-      console.warn('Firestore is offline. Customer config sync failed.', err.message || err);
+      console.warn('Firestore is offline. User data sync failed.', err.message || err);
     } else {
-      console.error('Firestore saveCustomerConfig failed:', err);
+      console.error('Firestore saveUserData failed:', err);
     }
   }
 }
-
 // Helper to race a promise against a timeout
 function withTimeout<T>(promise: Promise<T>, timeoutMs: number, fallbackValue: T): Promise<T> {
   let timeoutId: any;
@@ -448,30 +468,29 @@ function withTimeout<T>(promise: Promise<T>, timeoutMs: number, fallbackValue: T
   });
 }
 
-// Retrieve customer config document
-export async function getCustomerConfig(userId: string): Promise<CustomerConfig | null> {
+// Retrieve user data document
+export async function getUserData(userId: string): Promise<CustomerConfig | null> {
   if (!db) {
-    traceLog.warn('FIRESTORE', 'getCustomerConfig', 'db not initialized');
+    traceLog.warn('FIRESTORE', 'getUserData', 'db not initialized');
     return null;
   }
   try {
-    const snap = await tracedFirestore('getCustomerConfig', userId, () => {
-      const docRef = doc(db!, 'users', userId, 'config', 'customerConfig');
+    const snap = await tracedFirestore('getUserData', userId, () => {
+      const docRef = firestoreUserDoc(db!, userId, USER_DATA_COLLECTION, USER_DATA_DOC);
       return withTimeout(getDocWithAuth(docRef, userId), 4000, null);
     });
     if (snap?.exists()) {
-      traceLog.info('FIRESTORE', 'getCustomerConfig', 'loaded', { found: true });
+      traceLog.info('FIRESTORE', 'getUserData', 'loaded', { found: true });
       return snap.data() as CustomerConfig;
     }
-    traceLog.info('FIRESTORE', 'getCustomerConfig', 'not found', { found: false });
+    traceLog.info('FIRESTORE', 'getUserData', 'not found', { found: false });
   } catch (err: any) {
-    logFirestoreAccessError('getCustomerConfig', err);
+    logFirestoreAccessError('getUserData', err);
   }
   return null;
 }
-
 // Bundled core competencies catalog (src/shared/core-competencies-seed.ts)
-// User selections: users/{userId}/config/userCompetencies — { catalogRefs, custom, updatedAt }
+// User selections: users/{userId}/userData/userCompetencies — { catalogRefs, custom, updatedAt }
 
 const USER_COMPETENCIES_DOC = 'userCompetencies';
 
@@ -491,7 +510,7 @@ export async function getUserCompetencyProfile(userId: string): Promise<UserComp
   }
 
   try {
-    const profileRef = doc(db, 'users', userId, 'config', USER_COMPETENCIES_DOC);
+    const profileRef = firestoreUserDoc(db, userId, USER_DATA_COLLECTION, USER_COMPETENCIES_DOC);
     const snap = await getDocWithAuth(profileRef, userId);
     if (!snap?.exists()) {
       return emptyUserCompetencyProfile();
@@ -529,14 +548,14 @@ export async function saveUserCompetencyProfile(
   }
 
   try {
-    const profileRef = doc(db, 'users', userId, 'config', USER_COMPETENCIES_DOC);
+    const profileRef = firestoreUserDoc(db, userId, USER_DATA_COLLECTION, USER_COMPETENCIES_DOC);
     const payload: UserCompetencyProfile = {
       ...profile,
       updatedAt: new Date().toISOString(),
     };
     await setDoc(profileRef, stripUndefinedForFirestore(payload));
     console.log(
-      `[AutoApplyAI] Saved user competencies: ${payload.catalogRefs.length} catalog refs, ${payload.custom.length} custom at users/${userId}/config/${USER_COMPETENCIES_DOC}`
+      `[AutoApplyAI] Saved user competencies: ${payload.catalogRefs.length} catalog refs, ${payload.custom.length} custom at ${getFirestorePath('users')}/${userId}/${USER_DATA_COLLECTION}/${USER_COMPETENCIES_DOC}`
     );
   } catch (err: any) {
     logFirestoreAccessError('saveUserCompetencyProfile', err);
@@ -545,7 +564,7 @@ export async function saveUserCompetencyProfile(
 }
 
 // Bundled core skills catalog (src/shared/core-skills-seed.ts)
-// User selections: users/{userId}/config/userSkills — { catalogRefs, custom, updatedAt }
+// User selections: users/{userId}/userData/userSkills — { catalogRefs, custom, updatedAt }
 
 const USER_SKILLS_DOC = 'userSkills';
 
@@ -565,7 +584,7 @@ export async function getUserSkillProfile(userId: string): Promise<UserSkillProf
   }
 
   try {
-    const profileRef = doc(db, 'users', userId, 'config', USER_SKILLS_DOC);
+    const profileRef = firestoreUserDoc(db, userId, USER_DATA_COLLECTION, USER_SKILLS_DOC);
     const snap = await getDocWithAuth(profileRef, userId);
     if (!snap?.exists()) {
       return emptyUserSkillProfile();
@@ -603,14 +622,14 @@ export async function saveUserSkillProfile(
   }
 
   try {
-    const profileRef = doc(db, 'users', userId, 'config', USER_SKILLS_DOC);
+    const profileRef = firestoreUserDoc(db, userId, USER_DATA_COLLECTION, USER_SKILLS_DOC);
     const payload: UserSkillProfile = {
       ...profile,
       updatedAt: new Date().toISOString(),
     };
     await setDoc(profileRef, stripUndefinedForFirestore(payload));
     console.log(
-      `[AutoApplyAI] Saved user skills: ${payload.catalogRefs.length} catalog refs, ${payload.custom.length} custom at users/${userId}/config/${USER_SKILLS_DOC}`
+      `[AutoApplyAI] Saved user skills: ${payload.catalogRefs.length} catalog refs, ${payload.custom.length} custom at ${getFirestorePath('users')}/${userId}/${USER_DATA_COLLECTION}/${USER_SKILLS_DOC}`
     );
   } catch (err: any) {
     logFirestoreAccessError('saveUserSkillProfile', err);
@@ -619,7 +638,6 @@ export async function saveUserSkillProfile(
 }
 
 export interface SupportReportMailPayload {
-  to: string;
   userId: string;
   userEmail?: string;
   category: string;
@@ -637,66 +655,7 @@ export interface SupportReportMailPayload {
   };
 }
 
-function extractSupportEmailFromData(data: Record<string, unknown> | undefined): string | null {
-  if (!data) return null;
-  for (const key of ['email', 'address', 'value', 'to']) {
-    const value = data[key];
-    if (typeof value === 'string' && value.includes('@')) {
-      return value.trim();
-    }
-  }
-  return null;
-}
-
-export async function getSupportMailAddress(userId: string): Promise<string | null> {
-  if (!db) return null;
-  if (!(await ensureFirestoreAuth(userId))) return null;
-
-  const configDocIds = ['supportEmail', 'supportMail'];
-
-  async function readConfigDoc(docId: string) {
-    const configRef = doc(db!, 'appConfig', docId);
-    try {
-      return await getDoc(configRef);
-    } catch (err: unknown) {
-      const code = (err as { code?: string })?.code ?? '';
-      if (code === PERMISSION_DENIED_CODE && auth?.currentUser) {
-        if (!(await ensureFirestoreAuth(userId, true))) return null;
-        return await getDoc(configRef);
-      }
-      throw err;
-    }
-  }
-
-  try {
-    for (const docId of configDocIds) {
-      const snap = await readConfigDoc(docId);
-      if (!snap?.exists()) {
-        traceLog.debug('FIRESTORE', 'getSupportMailAddress', 'config doc missing', { docId });
-        continue;
-      }
-
-      const data = snap.data() as Record<string, unknown>;
-      if (data.status === false) {
-        traceLog.debug('FIRESTORE', 'getSupportMailAddress', 'config disabled', { docId });
-        continue;
-      }
-
-      const fromField = extractSupportEmailFromData(data);
-      if (fromField) {
-        traceLog.debug('FIRESTORE', 'getSupportMailAddress', 'resolved support email', { docId });
-        return fromField;
-      }
-    }
-
-    return null;
-  } catch (err: unknown) {
-    logFirestoreAccessError('getSupportMailAddress', err);
-    return null;
-  }
-}
-
-export async function submitSupportReportMail(payload: SupportReportMailPayload): Promise<string> {
+export async function createPendingSupportReportMail(payload: SupportReportMailPayload): Promise<string> {
   if (!db) {
     throw new Error('Firestore is not configured.');
   }
@@ -705,38 +664,72 @@ export async function submitSupportReportMail(payload: SupportReportMailPayload)
   }
 
   try {
-    const mailDoc = stripUndefinedForFirestore({
-      // Trigger Email extension (firebase/firestore-send-email) reads these fields.
-      to: payload.to,
-      replyTo: payload.userEmail || undefined,
-      message: {
-        subject: payload.message.subject,
-        text: payload.message.text,
-        html: payload.message.html,
-      },
-      // App metadata for dashboards / custom workers.
-      source: 'extension',
-      reportType: 'support',
-      userId: payload.userId,
-      userEmail: payload.userEmail,
-      category: payload.category,
-      screen: payload.screen,
-      url: payload.url || undefined,
-      details: payload.details,
-      diagnostics: payload.diagnostics,
-      createdAt: new Date().toISOString(),
-      status: 'pending',
-    });
+    const supportEmail = await getSupportMailAddress(payload.userId);
+    if (!supportEmail) {
+      throw new Error(
+        'Support email is not configured in appConfig/emailJs (email field) or appConfig/supportEmail.'
+      );
+    }
 
-    const ref = await addDoc(collection(db, 'mail'), mailDoc);
-    traceLog.info('FIRESTORE', 'submitSupportReportMail', 'queued support report', {
+    const mailDoc = {
+      ...stripUndefinedForFirestore({
+        to: supportEmail,
+        replyTo: payload.userEmail || undefined,
+        message: {
+          subject: payload.message.subject,
+          text: payload.message.text,
+          html: payload.message.html,
+        },
+        source: 'extension',
+        reportType: 'support',
+        userId: payload.userId,
+        userEmail: payload.userEmail,
+        category: payload.category,
+        screen: payload.screen,
+        url: payload.url || undefined,
+        details: payload.details,
+        diagnostics: payload.diagnostics,
+        status: 'pending',
+      }),
+      createdAt: serverTimestamp(),
+    };
+
+    const ref = await addDoc(firestoreMailCollection(db), mailDoc);
+    traceLog.info('FIRESTORE', 'createPendingSupportReportMail', 'queued support report', {
       mailId: ref.id,
       category: payload.category,
     });
     return ref.id;
   } catch (err: unknown) {
-    logFirestoreAccessError('submitSupportReportMail', err);
+    logFirestoreAccessError('createPendingSupportReportMail', err);
     throw err instanceof Error ? err : new Error('Failed to submit report.');
+  }
+}
+
+export async function updateSupportReportMailDelivery(
+  mailId: string,
+  userId: string,
+  status: 'SUCCESS' | 'ERROR',
+  delivery: Record<string, unknown>
+): Promise<void> {
+  if (!db) {
+    throw new Error('Firestore is not configured.');
+  }
+  if (!(await ensureFirestoreAuth(userId))) {
+    throw new Error('You must be signed in to submit a report.');
+  }
+
+  try {
+    await updateDoc(firestoreMailDoc(db, mailId), {
+      status,
+      delivery: {
+        ...delivery,
+        endTime: serverTimestamp(),
+      },
+    });
+  } catch (err: unknown) {
+    logFirestoreAccessError('updateSupportReportMailDelivery', err);
+    throw err instanceof Error ? err : new Error('Failed to update report delivery status.');
   }
 }
 

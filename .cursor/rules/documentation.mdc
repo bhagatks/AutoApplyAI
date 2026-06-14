@@ -8,8 +8,9 @@ alwaysApply: true
 When you change **architecture, entry flows, major modules, or user-visible behavior**:
 
 1. Update `docs/ARCHITECTURE.md` — overview, runtime table, directory map, pipeline summary, or changelog row with date + one-line summary.
-2. If auth/onboarding gates change, also update `FLOW.md`.
-3. If resume engine contracts change, also update `RESUME_SPEC.md`.
-4. Do **not** expand README.md with v2 details; point to `docs/` instead.
+2. When suggesting **setup steps, decisions, or follow-up work** in chat, add or update rows in `docs/ACTION_ITEMS.md` (do not rely on chat-only lists). Move finished rows to `docs/COMPLETED_ITEMS.md` with the date.
+3. If auth/onboarding gates change, also update `FLOW.md`.
+4. If resume engine contracts change, also update `RESUME_SPEC.md`.
+5. Do **not** expand README.md with v2 details; point to `docs/` instead.
 
 Skip doc updates for trivial fixes (typos, single-line UI tweaks) unless they change documented behavior.

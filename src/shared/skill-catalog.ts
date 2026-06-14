@@ -20,7 +20,7 @@ export interface CoreSkillCatalog {
   updatedAt: string;
 }
 
-/** Per-user skill selections — stored at users/{uid}/config/userSkills */
+/** Per-user skill selections — stored at users/{uid}/userData/userSkills */
 export interface UserSkillProfile {
   catalogRefs: string[];
   custom: CoreSkillEntry[];

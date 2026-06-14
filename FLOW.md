@@ -40,7 +40,7 @@ All of the following fields are strictly required:
 | `email` | `string` | Google Profile (Email Address) | Candidate's email contact. |
 | `phone` | `string` | User Input | Candidate's phone number (e.g., `555-555-5555`). |
 | `geminiApiKey` | `string` | User Input | Gemini API key used for tailoring (e.g., starts with `AIzaSy`). |
-| `outputDir` | `string` | User Input | Local target directory path for saving resumes (e.g., `/Users/bstar/Downloads/resume_backup/`). |
+| `outputDir` | `string` | User Input | Display label for the output folder (folder name from picker). Authoritative write handle lives in IndexedDB — not `customer_config`. |
 | `resume` | `string` | File Upload (PDF) | PDF resume file name. Saved locally & referenced. |
 
 ### Configuration Structure (`customer_config`)
@@ -50,7 +50,7 @@ The final structure generated upon completing onboarding is:
 {
   "customerId": "customer_fname_lname",
   "geminiApiKey": "YOUR_GEMINI_API_KEY",
-  "outputDir": "/Users/bstar/Downloads/resume_backup/",
+  "outputDir": "MyResumes",
   "candidateProfile": {
     "firstName": "f_name",
     "lastName": "l_name",
@@ -71,7 +71,7 @@ Onboarding data is persisted through two modes to guarantee seamless access:
 1. **Local Storage**: 
    - Chrome Extension: `chrome.storage.local`
    - Web Dashboard: `localStorage`
-2. **Cloud Synchronization**: Saved directly to Google Cloud Firestore under `/users/{uid}/config/customerConfig` for cross-device syncing.
+2. **Cloud Synchronization**: Saved directly to Google Cloud Firestore under `/users/{uid}/userData/userData` for cross-device syncing.
 
 ---
 
@@ -92,6 +92,7 @@ npm run test
 - Flow resolver routes unauthenticated users to the Login panel.
 - Flow resolver routes authenticated users without complete configurations to the Onboarding gate.
 - Flow resolver successfully unlocks the main workspace once onboarding is complete.
+- **Extension sidepanel:** shows a single “Securing connection…” state until `waitForAuthGateway()` finishes and one launch cloud sync completes — prevents onboarding ↔ home flicker during startup.
 
 ---
 
@@ -134,4 +135,6 @@ Files are written via the File System Access API handle saved at onboarding. Re-
 ### Storage keys
 - `pipeline_queue_v1` — job queue (mirrored to `localHistory` for compatibility)
 - `pipeline_settings_v1` — `{ paused, maxConcurrentTailors, autoStartApply }`
-- IndexedDB `autoapplyai-fs` — persisted `outputDir` handle for artifact writes
+- `output_dir_label` — chrome.storage.local display label for the picked output folder
+- IndexedDB `autoapplyai-fs` — persisted `outputDir` handle for artifact writes (authoritative for folder selection)
+- Get Started folder picker delegates to the active tab's content script (`OPEN_NATIVE_DIRECTORY_PICKER` → native OS dialog); falls back to `directory-picker.html` when no injectable tab is available

@@ -19,7 +19,8 @@ import {
 import { Job, ResumeRules, BaseProfile, CustomerConfig } from '../shared/types';
 import { normalizeName } from '../shared/utils';
 import { formatAiErrorToast } from '../shared/ai-errors';
-import { subscribeToJobs, deleteJobFromDb, signInWithGoogleTokens, signInWithChromeToken, getUserProfile, auth, saveCloudApiKey, getCloudApiKey, saveCustomerConfig, getCustomerConfig, getJobsFromDb, prepareFirestoreAccess } from '../shared/db';
+import { deleteJobFromDb, signInWithGoogleTokens, getUserProfile, auth, saveCloudApiKey, getCloudApiKey, saveUserData, getUserData, getJobsFromDb, prepareFirestoreAccess, bootstrapAppConfig, startAppConfigRefreshInterval, clearAppConfigCache } from '../shared/db';
+import { initSentry } from '../shared/sentry';
 import { encryptKey, decryptKey } from '../shared/crypto';
 import { onAuthStateChanged, signOut, User } from 'firebase/auth';
 import MicroOnboarding from './components/MicroOnboarding';
@@ -41,10 +42,9 @@ import { BasicUserConfig } from '../config/types';
 import { signOutGoogleAuth } from '../shared/google-auth';
 import {
   buildBasicUserConfig,
-  clearStaleBasicUserToken,
   isInvalidCredentialError,
   signInWithFreshChromeToken,
-  trySilentChromeAuthRefresh,
+  waitForAuthGateway,
 } from '../shared/auth-recovery';
 import { isCustomerConfigComplete, parsedResumeToBaseProfile } from '../shared/resume-types';
 import {
@@ -89,7 +89,7 @@ const DEFAULT_RULES: ResumeRules = {
     format_string: "\\footnotesize \\textbf{ATS STRATEGY MATCH TARGET:} 95\\%+ Optimization (Keywords: {keywords})"
   },
   file_naming: {
-    output_dir: "output"
+    output_dir: ""
   }
 };
 
@@ -127,12 +127,10 @@ export default function App() {
   const [activeTab, setActiveTab] = useState<'analysis' | 'resume' | 'cover' | 'preview'>('analysis');
   const [currentView, setCurrentView] = useState<'home' | 'detail'>('home');
   const [pipelinePaused, setPipelinePaused] = useState(false);
-  const [authLoading, setAuthLoading] = useState(true);
-  const [configLoading, setConfigLoading] = useState(true);
+  const [bootstrapping, setBootstrapping] = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [customerConfig, setCustomerConfig] = useState<CustomerConfig | null>(null);
   const [basicUserConfig, setBasicUserConfig] = useState<BasicUserConfig | null>(null);
-  const [storageLoaded, setStorageLoaded] = useState(false);
 
   // Settings Modal State
   const [showSettings, setShowSettings] = useState(false);
@@ -176,12 +174,15 @@ export default function App() {
   );
 
   // State to track if the user has completed onboarding for the active login session
-  const [isLoggedInFlag, setIsLoggedInFlag] = useState(false);
+  const [, setIsLoggedInFlag] = useState(false);
   // State to track if sign-in is currently processing
   const [isSigningIn, setIsSigningIn] = useState(false);
   const [sessionNeedsRefresh, setSessionNeedsRefresh] = useState(false);
   // Ref to track if we are in the middle of a sign-out to prevent race conditions during Firebase auth state changes
   const isSigningOutRef = useRef(false);
+  const bootCompletedRef = useRef(false);
+  const cloudSyncUserIdRef = useRef<string | null>(null);
+  const stopAppConfigRefreshRef = useRef<(() => void) | null>(null);
 
   const openSettings = () => {
     setDraftProfile({ ...candidateProfile });
@@ -215,144 +216,180 @@ export default function App() {
     }
   }, [showSettings, draftProvider, apiKey]);
 
+  const applyCloudConfigToState = (cloudConfig: CustomerConfig) => {
+    setCustomerConfig(cloudConfig);
+    setApiKey(cloudConfig.geminiApiKey);
+    if (cloudConfig.candidateProfile) {
+      setCandidateProfile((prev) => ({
+        ...prev,
+        firstName: cloudConfig.candidateProfile.firstName,
+        lastName: cloudConfig.candidateProfile.lastName,
+        email: cloudConfig.candidateProfile.email,
+        phone: cloudConfig.candidateProfile.phone,
+      }));
+    }
+  };
+
+  const applyCloudApiKeyDoc = async (userId: string) => {
+    const cloudDoc = await getCloudApiKey(userId);
+    if (!cloudDoc) return;
+    if (!cloudDoc.encrypted) {
+      setApiKey(cloudDoc.key);
+      await setChromeLocal({ geminiApiKey: cloudDoc.key });
+      return;
+    }
+    const store = await getChromeLocal(['cloudPassphrase']);
+    const savedPassphrase = (store.cloudPassphrase as string) || '';
+    if (savedPassphrase) {
+      try {
+        const decrypted = await decryptKey(cloudDoc.key, savedPassphrase);
+        setApiKey(decrypted);
+        await setChromeLocal({ geminiApiKey: decrypted });
+      } catch {
+        setEncryptedKeyCiphertext(cloudDoc.key);
+        setPassphrasePromptOpen(true);
+      }
+    } else {
+      setEncryptedKeyCiphertext(cloudDoc.key);
+      setPassphrasePromptOpen(true);
+    }
+  };
+
+  /** Single cloud sync path — one getUserData per auth session unless forced (Refresh). */
+  const syncCloudSessionForUser = async (
+    user: User,
+    options?: { force?: boolean }
+  ): Promise<CustomerConfig | null> => {
+    if (!options?.force && cloudSyncUserIdRef.current === user.uid) {
+      logDebug('Cloud sync already completed for this user session.');
+      return null;
+    }
+
+    const authReady = await prepareFirestoreAccess(user.uid);
+    if (!authReady) {
+      logDebug('Firestore auth not ready. Skipping cloud sync.');
+      return null;
+    }
+
+    await setChromeLocal({ userId: user.uid });
+    await bootstrapAppConfig(user.uid);
+    await initSentry('sidepanel', user.uid);
+
+    if (stopAppConfigRefreshRef.current) {
+      stopAppConfigRefreshRef.current();
+    }
+    stopAppConfigRefreshRef.current = startAppConfigRefreshInterval(user.uid);
+
+    const [cloudConfig, firestoreJobs] = await Promise.all([
+      getUserData(user.uid),
+      getJobsFromDb(user.uid),
+    ]);
+
+    void loadPipelineQueue().then((pipeline) => {
+      setJobs(mergePipelineWithFirestore(pipeline, firestoreJobs));
+    });
+
+    if (cloudConfig) {
+      applyCloudConfigToState(cloudConfig);
+      const complete = isConfigComplete(cloudConfig);
+      await setChromeLocal({
+        customer_config: cloudConfig,
+        ...(complete ? { is_logged_in: true } : {}),
+      });
+      setIsLoggedInFlag(complete);
+    }
+
+    await applyCloudApiKeyDoc(user.uid);
+    cloudSyncUserIdRef.current = user.uid;
+    return cloudConfig;
+  };
+
   // Load Settings and History on init
   useEffect(() => {
     loadPipelineSettings().then((s) => setPipelinePaused(s.paused));
     loadPipelineQueue().then(setJobs);
 
-    // 1. Fetch credentials, custom rules and candidate profile from unified storage
     loadLocalSettings().then((res) => {
       if (res.geminiApiKey) setApiKey(res.geminiApiKey);
       if (res.resumeRules) setCustomRules(res.resumeRules);
       if (res.candidateProfile) setCandidateProfile(res.candidateProfile);
     });
 
-    getChromeLocal(['customer_config', 'basic_user_config', 'is_logged_in']).then((res) => {
-      if (res.is_logged_in) {
-        setIsLoggedInFlag(true);
-      }
-      if (res.customer_config) {
-        const config = res.customer_config as CustomerConfig;
-        const isComplete = isConfigComplete(config);
-        if (isComplete) {
-          setConfigLoading(false);
-        }
-        setCustomerConfig(config);
-        setApiKey(config.geminiApiKey);
-        if (config.candidateProfile) {
-          setCandidateProfile(prev => ({
-            ...prev,
-            firstName: config.candidateProfile.firstName,
-            lastName: config.candidateProfile.lastName,
-            email: config.candidateProfile.email,
-            phone: config.candidateProfile.phone
-          }));
-        }
-      }
-      if (res.basic_user_config) {
-        setBasicUserConfig(res.basic_user_config as BasicUserConfig);
-      }
-      setStorageLoaded(true);
-    });
+    let unsubAuth: (() => void) | undefined;
 
-    // 2. Set up Firebase Authentication listener
-    let unsubJobs: (() => void) | null = null;
+    const runBoot = async () => {
+      try {
+        const gateway = await waitForAuthGateway(auth);
+        setBasicUserConfig(gateway.basicUserConfig);
+        setCurrentUser(gateway.user);
+
+        if (gateway.user) {
+          const storedBasic = await getChromeLocal(['basic_user_config']);
+          const storedToken = (storedBasic.basic_user_config as BasicUserConfig | undefined)?.token;
+          if (!storedToken) {
+            logDebug('Firebase session without basic_user_config — clearing orphaned session.');
+            isSigningOutRef.current = true;
+            if (auth) {
+              try {
+                await signOut(auth);
+              } catch {
+                /* ignore */
+              }
+            }
+            setCurrentUser(null);
+            clearAppConfigCache();
+            cloudSyncUserIdRef.current = null;
+            return;
+          }
+
+          if (gateway.firestoreReady) {
+            await syncCloudSessionForUser(gateway.user);
+          } else {
+            const local = await getChromeLocal(['customer_config', 'is_logged_in']);
+            const cachedConfig = local.customer_config as CustomerConfig | undefined;
+            if (cachedConfig) {
+              applyCloudConfigToState(cachedConfig);
+              const complete = isConfigComplete(cachedConfig);
+              setIsLoggedInFlag(complete && !!local.is_logged_in);
+            }
+          }
+        } else {
+          clearAppConfigCache();
+          cloudSyncUserIdRef.current = null;
+          if (stopAppConfigRefreshRef.current) {
+            stopAppConfigRefreshRef.current();
+            stopAppConfigRefreshRef.current = null;
+          }
+          removeChromeLocal('userId');
+        }
+      } catch (err) {
+        console.error('Sidepanel boot failed:', err);
+      } finally {
+        bootCompletedRef.current = true;
+        setBootstrapping(false);
+      }
+    };
+
+    void runBoot();
+
     if (auth) {
-      const unsubAuth = onAuthStateChanged(auth, (user) => {
-        setCurrentUser(user);
-        setAuthLoading(false);
+      unsubAuth = onAuthStateChanged(auth, (user) => {
+        if (!bootCompletedRef.current) return;
 
-        if (unsubJobs) {
-          unsubJobs();
-          unsubJobs = null;
+        setCurrentUser(user);
+
+        if (stopAppConfigRefreshRef.current) {
+          stopAppConfigRefreshRef.current();
+          stopAppConfigRefreshRef.current = null;
         }
 
         if (user) {
-          // Sync chrome.storage.local with user ID
-          setChromeLocal({ userId: user.uid });
-
-          const syncCloudData = async () => {
-            const authReady = await prepareFirestoreAccess(user.uid);
-            if (!authReady) {
-              logDebug('Firestore auth not ready yet. Skipping cloud sync until token refresh succeeds.');
-              setConfigLoading(false);
-              return;
-            }
-
-            // Subscribe to Firestore for real-time updates
-            unsubJobs = subscribeToJobs(user.uid, (syncedJobs) => {
-              void loadPipelineQueue().then((pipeline) => {
-                setJobs(mergePipelineWithFirestore(pipeline, syncedJobs));
-              });
-            });
-
-            getCustomerConfig(user.uid).then((cloudConfig) => {
-              if (cloudConfig) {
-                setCustomerConfig(cloudConfig);
-                setApiKey(cloudConfig.geminiApiKey);
-
-                const isComplete = isConfigComplete(cloudConfig);
-                if (isComplete) {
-                  setChromeLocal({
-                    customer_config: cloudConfig,
-                    is_logged_in: true,
-                  }).then(() => {
-                    logDebug('Cloud config is complete. Auto-skipping onboarding.');
-                    setIsLoggedInFlag(true);
-                  });
-                } else {
-                  setChromeLocal({ customer_config: cloudConfig });
-                }
-
-                if (cloudConfig.candidateProfile) {
-                  setCandidateProfile(prev => ({
-                    ...prev,
-                    firstName: cloudConfig.candidateProfile.firstName,
-                    lastName: cloudConfig.candidateProfile.lastName,
-                    email: cloudConfig.candidateProfile.email,
-                    phone: cloudConfig.candidateProfile.phone
-                  }));
-                }
-              }
-            }).catch((err) => {
-              console.error('Failed to get customer config from Firestore:', err);
-            }).finally(() => {
-              setConfigLoading(false);
-            });
-
-            getCloudApiKey(user.uid).then((cloudDoc) => {
-              if (cloudDoc) {
-                if (!cloudDoc.encrypted) {
-                  setApiKey(cloudDoc.key);
-                  setChromeLocal({ geminiApiKey: cloudDoc.key });
-                } else {
-                  getChromeLocal(['cloudPassphrase']).then((store) => {
-                    const savedPassphrase = (store.cloudPassphrase as string) || '';
-                    if (savedPassphrase) {
-                      decryptKey(cloudDoc.key, savedPassphrase)
-                        .then((decrypted) => {
-                          setApiKey(decrypted);
-                          setChromeLocal({ geminiApiKey: decrypted });
-                        })
-                        .catch(() => {
-                          setEncryptedKeyCiphertext(cloudDoc.key);
-                          setPassphrasePromptOpen(true);
-                        });
-                    } else {
-                      setEncryptedKeyCiphertext(cloudDoc.key);
-                      setPassphrasePromptOpen(true);
-                    }
-                  });
-                }
-              }
-            }).catch((err) => {
-              console.warn('Failed to get cloud API key:', err);
-            });
-          };
-
-          syncCloudData();
+          void syncCloudSessionForUser(user).catch((err) => {
+            console.error('Post-auth cloud sync failed:', err);
+          });
         } else {
-          setConfigLoading(false);
+          clearAppConfigCache();
+          cloudSyncUserIdRef.current = null;
           removeChromeLocal('userId');
           if (isSigningOutRef.current) {
             logDebug('Sign-out in progress. Bypassing reloading local settings.');
@@ -360,7 +397,6 @@ export default function App() {
             setJobs([]);
             setCandidateProfile(DEFAULT_PROFILE);
           } else {
-            // Reload local history if signed out normally (e.g., startup / sync)
             loadLocalSettings().then((res) => {
               setJobs(res.localHistory || []);
               setCandidateProfile(res.candidateProfile || DEFAULT_PROFILE);
@@ -368,41 +404,38 @@ export default function App() {
           }
         }
       });
+    }
 
-      const handleStorageChange = (changes: any, areaName: string) => {
-        if (areaName === 'local') {
-          if (changes.customer_config) {
-            const newConfig = changes.customer_config.newValue || null;
-            setCustomerConfig(newConfig);
-            if (newConfig) {
-              setApiKey(newConfig.geminiApiKey);
-              if (newConfig.candidateProfile) {
-                setCandidateProfile(prev => ({
-                  ...prev,
-                  firstName: newConfig.candidateProfile.firstName,
-                  lastName: newConfig.candidateProfile.lastName,
-                  email: newConfig.candidateProfile.email,
-                  phone: newConfig.candidateProfile.phone
-                }));
-              }
+    const handleStorageChange = (changes: Record<string, chrome.storage.StorageChange>, areaName: string) => {
+      if (areaName === 'local') {
+        if (changes.customer_config) {
+          const newConfig = changes.customer_config.newValue || null;
+          setCustomerConfig(newConfig);
+          if (newConfig) {
+            setApiKey(newConfig.geminiApiKey);
+            if (newConfig.candidateProfile) {
+              setCandidateProfile((prev) => ({
+                ...prev,
+                firstName: newConfig.candidateProfile.firstName,
+                lastName: newConfig.candidateProfile.lastName,
+                email: newConfig.candidateProfile.email,
+                phone: newConfig.candidateProfile.phone,
+              }));
             }
           }
-          if (changes.basic_user_config) {
-            setBasicUserConfig(changes.basic_user_config.newValue || null);
-          }
         }
-      };
-      const removeStorageListener = addChromeLocalChangedListener(handleStorageChange);
+        if (changes.basic_user_config) {
+          setBasicUserConfig(changes.basic_user_config.newValue || null);
+        }
+      }
+    };
+    const removeStorageListener = addChromeLocalChangedListener(handleStorageChange);
 
-      return () => {
-        unsubAuth();
-        if (unsubJobs) unsubJobs();
-        removeStorageListener();
-      };
-    } else {
-      setAuthLoading(false);
-      setConfigLoading(false);
-    }
+    return () => {
+      unsubAuth?.();
+      if (stopAppConfigRefreshRef.current) stopAppConfigRefreshRef.current();
+      removeStorageListener();
+    };
   }, []);
 
   // Sync selectedJob when history updates
@@ -414,6 +447,8 @@ export default function App() {
       }
     }
   }, [jobs]);
+
+  const refreshPipelineTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const refreshPipeline = async () => {
     const queue = await loadPipelineQueue();
@@ -434,10 +469,18 @@ export default function App() {
   };
 
   useEffect(() => {
+    const scheduleRefreshPipeline = () => {
+      if (refreshPipelineTimerRef.current) clearTimeout(refreshPipelineTimerRef.current);
+      refreshPipelineTimerRef.current = setTimeout(() => {
+        refreshPipelineTimerRef.current = null;
+        void refreshPipeline();
+      }, 100);
+    };
+
     const onStorage = (changes: Record<string, chrome.storage.StorageChange>, area: string) => {
       if (area !== 'local') return;
       if (changes.pipeline_queue_v1 || changes.localHistory) {
-        void refreshPipeline();
+        scheduleRefreshPipeline();
       }
       if (changes.pipeline_settings_v1) {
         const next = changes.pipeline_settings_v1.newValue as { paused?: boolean } | undefined;
@@ -448,7 +491,7 @@ export default function App() {
 
     const onMessage = (message: { action?: string; jobId?: string }, _sender: chrome.runtime.MessageSender, sendResponse: (r?: unknown) => void) => {
       if (message.action === 'PIPELINE_UPDATED') {
-        void refreshPipeline();
+        scheduleRefreshPipeline();
         return;
       }
       if (message.action === 'SAVE_JOB_ARTIFACTS' && message.jobId) {
@@ -462,23 +505,23 @@ export default function App() {
     void chrome.runtime.sendMessage({ action: 'PROCESS_PIPELINE' }).catch(() => {});
 
     return () => {
+      if (refreshPipelineTimerRef.current) clearTimeout(refreshPipelineTimerRef.current);
       removePipelineStorage();
       chrome.runtime.onMessage.removeListener(onMessage);
     };
   }, [customRules, candidateProfile]);
 
-  useEffect(() => {
-    const hasActiveTailoring = jobs.some(isJobActivelyTailoring);
-    if (!hasActiveTailoring) return;
+  const isTailoringActive = jobs.some(isJobActivelyTailoring);
 
-    const tick = () => {
-      void refreshPipeline();
+  useEffect(() => {
+    if (!isTailoringActive) return;
+
+    void chrome.runtime.sendMessage({ action: 'PROCESS_PIPELINE' }).catch(() => {});
+    const interval = setInterval(() => {
       void chrome.runtime.sendMessage({ action: 'PROCESS_PIPELINE' }).catch(() => {});
-    };
-    tick();
-    const interval = setInterval(tick, 8000);
+    }, 8000);
     return () => clearInterval(interval);
-  }, [jobs]);
+  }, [isTailoringActive]);
 
   const handleTogglePipelinePause = async () => {
     const next = !pipelinePaused;
@@ -594,6 +637,7 @@ export default function App() {
         signInWithGoogleTokens(idToken, accessToken)
           .then((user) => {
             if (user) {
+              cloudSyncUserIdRef.current = null;
               const parts = (user.displayName || '').trim().split(/\s+/);
               const basicConfig = {
                 uid: user.uid,
@@ -629,107 +673,6 @@ export default function App() {
     }
   }, []);
 
-  // Synchronize Firebase auth state with basicUserConfig
-  useEffect(() => {
-    if (!storageLoaded) return;
-    if (basicUserConfig && basicUserConfig.token) {
-      if (!currentUser || currentUser.uid !== basicUserConfig.uid) {
-        logDebug('Sync active: basicUserConfig token found, but currentUser is mismatched or null. Authenticating...');
-        setAuthLoading(true);
-        const isAccessToken = basicUserConfig.token.startsWith('ya29.');
-        const signInPromise = isAccessToken
-          ? signInWithChromeToken(basicUserConfig.token)
-          : signInWithGoogleTokens(basicUserConfig.token, null);
-        signInPromise
-          .then((user) => {
-            if (user) {
-              setSessionNeedsRefresh(false);
-              logDebug('Successfully logged in extension via stored basicUserConfig token.');
-              if (user.uid !== basicUserConfig.uid) {
-                logDebug('UID mismatch during sync. Updating basic_user_config with new UID:', user.uid);
-                const updatedConfig = buildBasicUserConfig(user, basicUserConfig.token, basicUserConfig);
-                chrome.storage.local.set({ basic_user_config: updatedConfig }, () => {
-                  setBasicUserConfig(updatedConfig);
-                });
-              }
-            }
-          })
-          .catch(async (err) => {
-            const expired = isInvalidCredentialError(err);
-            if (expired) {
-              logDebug('Stored Google token expired — clearing cache and trying silent refresh.');
-            } else {
-              logDebug('Failed to sign in with stored token:', err);
-            }
-
-            const clearedConfig = await clearStaleBasicUserToken(basicUserConfig);
-            setBasicUserConfig(clearedConfig);
-
-            const { user: refreshedUser, token: freshToken } = await trySilentChromeAuthRefresh();
-            if (refreshedUser && freshToken) {
-              const updatedConfig = buildBasicUserConfig(refreshedUser, freshToken, basicUserConfig);
-              await setChromeLocal({ basic_user_config: updatedConfig });
-              setBasicUserConfig(updatedConfig);
-              setSessionNeedsRefresh(false);
-              logDebug('Silent auth refresh succeeded.');
-              return;
-            }
-
-            setSessionNeedsRefresh(true);
-
-            if (typeof chrome !== 'undefined' && chrome.storage?.local) {
-              chrome.storage.local.get(['customer_config'], (res) => {
-                if (res.customer_config) {
-                  logDebug('Local profile kept — tap Sync via Google to restore cloud sync.');
-                  return;
-                }
-                handleSignOut();
-              });
-            } else {
-              handleSignOut();
-            }
-          })
-          .finally(() => {
-            setAuthLoading(false);
-          });
-      } else if (currentUser) {
-        prepareFirestoreAccess(currentUser.uid).then((ready) => {
-          if (!ready) return;
-          getCustomerConfig(currentUser.uid).then((cloudConfig) => {
-            if (cloudConfig) {
-              setCustomerConfig(cloudConfig);
-              setApiKey(cloudConfig.geminiApiKey);
-              chrome.storage.local.set({ customer_config: cloudConfig });
-            }
-          });
-          getCloudApiKey(currentUser.uid).then((cloudDoc) => {
-            if (cloudDoc && !cloudDoc.encrypted) {
-              setApiKey(cloudDoc.key);
-              chrome.storage.local.set({ geminiApiKey: cloudDoc.key });
-            }
-          });
-        });
-      }
-    } else {
-      if (currentUser && auth) {
-        // Double check storage to prevent race condition during external tab authentication
-        if (typeof chrome !== 'undefined' && chrome.storage && chrome.storage.local) {
-          chrome.storage.local.get(['basic_user_config'], (res) => {
-            if (!res.basic_user_config) {
-              logDebug('No stored basicUserConfig found in storage. Triggering full sign-out.');
-              handleSignOut();
-            } else {
-              logDebug('Stored config found in storage during sync, bypassing accidental logout.');
-            }
-          });
-        } else {
-          logDebug('No chrome storage available. Triggering full sign-out.');
-          handleSignOut();
-        }
-      }
-    }
-  }, [basicUserConfig, currentUser, storageLoaded]);
-
   const handleGoogleSignIn = async () => {
     if (isSigningIn) {
       logDebug('Sign-in already in progress. Ignoring duplicate request.');
@@ -760,6 +703,7 @@ export default function App() {
             const user = await signInWithFreshChromeToken(token);
             if (user) {
               setSessionNeedsRefresh(false);
+              cloudSyncUserIdRef.current = null;
               logDebug('Firebase Sign-in successful for UID:', user.uid);
               const basicConfig = buildBasicUserConfig(user, token);
 
@@ -807,6 +751,13 @@ export default function App() {
     isSigningOutRef.current = true;
 
     const tokenToClear = basicUserConfig?.token;
+
+    clearAppConfigCache();
+    cloudSyncUserIdRef.current = null;
+    if (stopAppConfigRefreshRef.current) {
+      stopAppConfigRefreshRef.current();
+      stopAppConfigRefreshRef.current = null;
+    }
 
     // Reset React state immediately
     setCurrentUser(null);
@@ -894,20 +845,14 @@ export default function App() {
       if (currentUser) {
         const authReady = await prepareFirestoreAccess(currentUser.uid);
         if (authReady) {
-          const [prof, cloudConfig, firestoreJobs] = await Promise.all([
-            getUserProfile(currentUser.uid),
-            getCustomerConfig(currentUser.uid),
-            getJobsFromDb(currentUser.uid),
-          ]);
-
+          const prof = await getUserProfile(currentUser.uid);
           if (prof) setCandidateProfile(prof);
-          if (cloudConfig) {
-            setCustomerConfig(cloudConfig);
-            setApiKey(cloudConfig.geminiApiKey);
-            await setChromeLocal({ customer_config: cloudConfig });
-          }
 
-          mergedJobs = mergePipelineWithFirestore(pipelineQueue, firestoreJobs);
+          await syncCloudSessionForUser(currentUser, { force: true });
+          mergedJobs = mergePipelineWithFirestore(
+            pipelineQueue,
+            await getJobsFromDb(currentUser.uid)
+          );
         }
       }
 
@@ -953,7 +898,7 @@ export default function App() {
           chrome.storage.local.set({ customer_config: updatedConfig }, () => resolve());
         });
         if (currentUser) {
-          await saveCustomerConfig(currentUser.uid, updatedConfig);
+          await saveUserData(currentUser.uid, updatedConfig);
         }
       }
 
@@ -1074,7 +1019,7 @@ export default function App() {
     }, 500);
   };
 
-  if (authLoading || configLoading) {
+  if (bootstrapping) {
     return withToasts(
       <div className="sidepanel-fill" style={{ justifyContent: 'center', alignItems: 'center', color: 'var(--text-primary)' }}>
         <Loader className="animate-spin" size={40} style={{ color: 'var(--brand-color)', marginBottom: 16 }} />
@@ -1127,7 +1072,7 @@ export default function App() {
     );
   }
 
-  if (!isLoggedInFlag || !isConfigComplete(customerConfig)) {
+  if (!isConfigComplete(customerConfig)) {
     return withToasts(
       <div className="sidepanel-fill">
         <MicroOnboarding

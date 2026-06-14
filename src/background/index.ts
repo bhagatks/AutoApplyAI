@@ -2,6 +2,7 @@
 // Manages the tailoring queue, Firebase database sync, and client-side Gemini execution.
 
 import { BASE_PROFILE } from '../shared/ai';
+import { getLLMCredentials } from '../config/app-config-manager';
 import { formatAiErrorToast } from '../shared/ai-errors';
 import { executeTailorJob } from '../shared/tailor-job';
 import { Job } from '../shared/types';
@@ -67,7 +68,6 @@ chrome.runtime.onConnect.addListener((port) => {
   });
 });
 
-// Helper: Send update messages to the content script widget
 function updateWidgetState(
   tabId: number | undefined,
   step: number,
@@ -86,8 +86,15 @@ function updateWidgetState(
   }
 }
 
+const QUIET_RUNTIME_ACTIONS = new Set([
+  'APP_TRACE_LOG',
+  'PROCESS_PIPELINE',
+  'PIPELINE_UPDATED',
+  'IS_SIDEPANEL_OPEN',
+]);
+
 chrome.runtime.onMessage.addListener((message: any, sender: chrome.runtime.MessageSender, sendResponse: (response?: any) => void) => {
-  if (message.action && message.action !== 'APP_TRACE_LOG') {
+  if (message.action && !QUIET_RUNTIME_ACTIONS.has(message.action)) {
     traceLog.debug('MSG', message.action, 'background received message', {
       tabId: sender.tab?.id,
     });
@@ -225,8 +232,7 @@ chrome.runtime.onMessage.addListener((message: any, sender: chrome.runtime.Messa
     (async () => {
       let provider: 'gemini' | 'openai' | 'anthropic' | 'grok' = 'gemini';
       try {
-        const localSettings = await chrome.storage.local.get(['geminiApiKey', 'resumeRules', 'userId', 'candidateProfile', 'customer_config']);
-        const apiKey = localSettings.geminiApiKey;
+        const localSettings = await chrome.storage.local.get(['resumeRules', 'userId', 'candidateProfile', 'customer_config']);
         const userId = localSettings.userId;
         const customerConfig = localSettings.customer_config;
         const parsedResume = customerConfig?.parsedResume ?? null;
@@ -235,6 +241,7 @@ chrome.runtime.onMessage.addListener((message: any, sender: chrome.runtime.Messa
           : (localSettings.candidateProfile || BASE_PROFILE);
         provider = customerConfig?.aiProvider || 'gemini';
         const model = customerConfig?.aiModel;
+        const apiKey = await getLLMCredentials(provider);
 
         const rules = resolveResumeRulesFromStorage(localSettings.resumeRules, customerConfig);
 

@@ -36,7 +36,7 @@ export function getResumeLayoutBudget(pageLimit: number): ResumeLayoutBudget {
   };
 }
 
-export function getDefaultResumeRules(outputDir = 'output'): ResumeRules {
+export function getDefaultResumeRules(outputDir = ''): ResumeRules {
   return {
     profile: {
       candidate_name: 'f_name l_name',
@@ -95,7 +95,7 @@ export function resolveResumeRulesFromStorage(
   customerConfig: Pick<CustomerConfig, 'outputDir' | 'resumePageLimit'> | null | undefined
 ): ResumeRules {
   const pageLimit = DEFAULT_RESUME_PAGE_LIMIT;
-  const outputDir = customerConfig?.outputDir || 'output';
+  const outputDir = customerConfig?.outputDir?.trim() || '';
 
   if (storedRulesJson) {
     try {

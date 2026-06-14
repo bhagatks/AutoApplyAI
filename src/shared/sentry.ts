@@ -1,5 +1,6 @@
 import * as Sentry from '@sentry/browser';
 import type { ErrorEvent, Contexts } from '@sentry/browser';
+import { resolveMonitoringConfig } from '../config/app-config-manager';
 
 export type SentrySurface = 'sidepanel' | 'dashboard';
 
@@ -54,15 +55,20 @@ function scrubEvent(event: ErrorEvent): ErrorEvent {
 }
 
 let initialized = false;
+let trackingEnabled = false;
 
-/** One Sentry project — tag each bundle with `surface`. DSN from VITE_SENTRY_DSN (.env). */
-export function initSentry(surface: SentrySurface): void {
+const resolveConfig = resolveMonitoringConfig;
+
+/**
+ * Initialize Sentry for a UI surface.
+ * Reads `appConfig/sentry` from the Firestore cache when `userId` is provided;
+ * otherwise falls back to `VITE_SENTRY_DSN` / `VITE_SENTRY_ENABLED`.
+ */
+export async function initSentry(surface: SentrySurface, userId?: string): Promise<void> {
   if (initialized) return;
 
-  const dsn = import.meta.env.VITE_SENTRY_DSN?.trim();
-  if (!dsn || import.meta.env.VITE_SENTRY_ENABLED === 'false') {
-    return;
-  }
+  const { dsn, enabled } = await resolveConfig(userId);
+  if (!enabled || !dsn) return;
 
   Sentry.init({
     dsn,
@@ -81,13 +87,14 @@ export function initSentry(surface: SentrySurface): void {
   });
 
   initialized = true;
+  trackingEnabled = true;
 }
 
 export function captureAppException(
   error: unknown,
   context?: { step?: string; tags?: Record<string, string> }
 ): void {
-  if (!import.meta.env.VITE_SENTRY_DSN?.trim()) return;
+  if (!trackingEnabled) return;
   Sentry.captureException(error, {
     tags: {
       ...(context?.step ? { step: context.step } : {}),

@@ -1,8 +1,93 @@
-import { User } from 'firebase/auth';
-import { signInWithChromeToken } from './db';
+import { Auth, User, onAuthStateChanged } from 'firebase/auth';
+import { prepareFirestoreAccess, signInWithChromeToken, signInWithGoogleTokens } from './db';
 import { removeChromeCachedAuthToken } from './google-auth';
-import { setChromeLocal } from './storage';
+import { getChromeLocal, setChromeLocal } from './storage';
 import { BasicUserConfig } from '../config/types';
+
+/** Max wait after an initial null auth emission for Firebase persistence to restore a session. */
+const AUTH_PERSISTENCE_SETTLE_MS = 2500;
+
+export interface AuthGatewayResult {
+  user: User | null;
+  basicUserConfig: BasicUserConfig | null;
+  firestoreReady: boolean;
+}
+
+function waitForFirebaseAuthSettled(auth: Auth): Promise<User | null> {
+  return new Promise((resolve) => {
+    let settled = false;
+    let settleTimer: ReturnType<typeof setTimeout> | null = null;
+
+    const finish = (user: User | null) => {
+      if (settled) return;
+      settled = true;
+      if (settleTimer) clearTimeout(settleTimer);
+      unsub();
+      resolve(user);
+    };
+
+    const unsub = onAuthStateChanged(auth, (user) => {
+      if (user) {
+        finish(user);
+        return;
+      }
+      if (!settleTimer) {
+        settleTimer = setTimeout(() => finish(null), AUTH_PERSISTENCE_SETTLE_MS);
+      }
+    });
+  });
+}
+
+async function signInFromBasicConfig(basic: BasicUserConfig): Promise<User | null> {
+  if (!basic.token) return null;
+  const isAccessToken = basic.token.startsWith('ya29.');
+  return isAccessToken
+    ? signInWithChromeToken(basic.token)
+    : signInWithGoogleTokens(basic.token, null);
+}
+
+/**
+ * Single auth gate for sidepanel boot: wait for Firebase persistence, restore from
+ * chrome.storage basic_user_config when needed, then validate Firestore token readiness.
+ */
+export async function waitForAuthGateway(auth: Auth | null): Promise<AuthGatewayResult> {
+  if (!auth) {
+    return { user: null, basicUserConfig: null, firestoreReady: false };
+  }
+
+  const stored = await getChromeLocal(['basic_user_config']);
+  let basicUserConfig = (stored.basic_user_config as BasicUserConfig | undefined) ?? null;
+
+  let user = await waitForFirebaseAuthSettled(auth);
+
+  if (!user && basicUserConfig?.token) {
+    try {
+      user = await signInFromBasicConfig(basicUserConfig);
+    } catch (err) {
+      if (isInvalidCredentialError(err) && basicUserConfig) {
+        basicUserConfig = await clearStaleBasicUserToken(basicUserConfig);
+        const { user: refreshedUser, token: freshToken } = await trySilentChromeAuthRefresh();
+        if (refreshedUser && freshToken) {
+          user = refreshedUser;
+          basicUserConfig = buildBasicUserConfig(refreshedUser, freshToken, basicUserConfig);
+          await setChromeLocal({ basic_user_config: basicUserConfig });
+        }
+      }
+    }
+  }
+
+  if (user && basicUserConfig && user.uid !== basicUserConfig.uid && basicUserConfig.token) {
+    basicUserConfig = buildBasicUserConfig(user, basicUserConfig.token, basicUserConfig);
+    await setChromeLocal({ basic_user_config: basicUserConfig });
+  }
+
+  let firestoreReady = false;
+  if (user) {
+    firestoreReady = await prepareFirestoreAccess(user.uid);
+  }
+
+  return { user, basicUserConfig, firestoreReady };
+}
 
 export function isInvalidCredentialError(err: unknown): boolean {
   if (!err || typeof err !== 'object') return false;

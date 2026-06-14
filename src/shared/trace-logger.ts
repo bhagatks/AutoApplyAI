@@ -89,6 +89,9 @@ function makeId(): string {
 }
 
 function consoleEmit(entry: TraceEntry): void {
+  // Debug traces are persisted for the Trace Logs panel but omitted from DevTools console.
+  if (entry.level === 'debug') return;
+
   const prefix = `[${entry.category}] ${entry.operation}`;
   const payload = entry.meta ? scrubMeta(entry.meta) : undefined;
   const line = `${prefix}: ${entry.message}${entry.durationMs != null ? ` (${entry.durationMs}ms)` : ''}`;
@@ -98,9 +101,6 @@ function consoleEmit(entry: TraceEntry): void {
       break;
     case 'warn':
       console.warn(line, payload ?? '');
-      break;
-    case 'debug':
-      console.debug(line, payload ?? '');
       break;
     default:
       console.log(line, payload ?? '');

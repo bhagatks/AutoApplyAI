@@ -1,4 +1,11 @@
-import { getSupportMailAddress, prepareFirestoreAccess, submitSupportReportMail } from './db';
+import emailjs from '@emailjs/browser';
+import {
+  createPendingSupportReportMail,
+  getSupportMailAddress,
+  prepareFirestoreAccess,
+  updateSupportReportMailDelivery,
+} from './db';
+import { resolveEmailJsConnectionConfig } from './app-config-cache';
 import { traceLog } from './trace-logger';
 
 export const SUPPORT_REPORT_CATEGORIES = [
@@ -73,34 +80,30 @@ export async function fetchSupportReportContext(): Promise<SupportReportContext>
   return fallback;
 }
 
-function sleepMs(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
 export async function checkSupportReportReady(userId: string): Promise<{ ready: boolean; error?: string }> {
-  for (let attempt = 0; attempt < 3; attempt += 1) {
-    if (!(await prepareFirestoreAccess(userId))) {
-      if (attempt < 2) {
-        await sleepMs(500);
-        continue;
-      }
-      return { ready: false, error: 'You must be signed in to submit a report.' };
-    }
-
-    const supportEmail = await getSupportMailAddress(userId);
-    if (supportEmail) {
-      return { ready: true };
-    }
-
-    if (attempt < 2) {
-      await sleepMs(500);
-    }
+  if (!(await prepareFirestoreAccess(userId))) {
+    return { ready: false, error: 'You must be signed in to submit a report.' };
   }
 
-  return {
-    ready: false,
-    error: 'Support email is not configured in appConfig/supportEmail.',
-  };
+  // Destination from appConfig/emailJs.email (cache), legacy appConfig/supportEmail fallback.
+  const supportEmail = await getSupportMailAddress(userId);
+  if (!supportEmail) {
+    return {
+      ready: false,
+      error: 'Support email is not configured in appConfig/emailJs (email field) or appConfig/supportEmail.',
+    };
+  }
+
+  const emailJs = await resolveEmailJsConnectionConfig(userId);
+  if (!emailJs) {
+    return {
+      ready: false,
+      error:
+        'Email delivery is not configured. Set serviceId/templateId/publicKey in appConfig/emailJs or VITE_EMAILJS_* in .env.local and rebuild.',
+    };
+  }
+
+  return { ready: true };
 }
 
 function escapeHtml(value: string): string {
@@ -139,19 +142,41 @@ function buildReportEmailBody(
   };
 }
 
+function getEmailJsDeliveryError(error: unknown): string {
+  if (typeof error === 'object' && error !== null && 'text' in error) {
+    const text = (error as { text: unknown }).text;
+    if (typeof text === 'string' && text.trim()) return text;
+  }
+  if (error instanceof Error && error.message.trim()) return error.message;
+  return String(error);
+}
+
 export async function submitSupportReport(
   userId: string,
   input: SupportReportFormInput,
   context: SupportReportContext
-): Promise<void> {
+): Promise<{ mailId: string; subject: string }> {
   if (!(await prepareFirestoreAccess(userId))) {
     throw new Error('You must be signed in to submit a report.');
   }
 
   const supportEmail = await getSupportMailAddress(userId);
   if (!supportEmail) {
-    throw new Error('Support email is not configured. Please try again later.');
+    throw new Error(
+      'Support email is not configured in appConfig/emailJs (email field) or appConfig/supportEmail.'
+    );
   }
+
+  const emailJs = await resolveEmailJsConnectionConfig(userId);
+  if (!emailJs) {
+    throw new Error(
+      'Email delivery is not configured. Set serviceId/templateId/publicKey in appConfig/emailJs or VITE_EMAILJS_* in .env.local and rebuild.'
+    );
+  }
+
+  traceLog.debug('FIRESTORE', 'submitSupportReport', 'EmailJS connection resolved', {
+    sources: emailJs.sources,
+  });
 
   const diagnostics = input.includeDiagnostics
     ? {
@@ -162,8 +187,7 @@ export async function submitSupportReport(
 
   const { subject, text, html } = buildReportEmailBody(input, diagnostics);
 
-  await submitSupportReportMail({
-    to: supportEmail,
+  const mailPayload = {
     userId,
     userEmail: input.userEmail,
     category: input.category,
@@ -172,5 +196,41 @@ export async function submitSupportReport(
     details: input.details.trim(),
     diagnostics,
     message: { subject, text, html },
-  });
+  };
+
+  const mailId = await createPendingSupportReportMail(mailPayload);
+
+  try {
+    await emailjs.send(
+      emailJs.serviceId,
+      emailJs.templateId,
+      {
+        app_name: 'AutoApplyAI',
+        subject,
+        text,
+        user_email: input.userEmail ?? '',
+        diagnostics: JSON.stringify(diagnostics ?? null),
+      },
+      { publicKey: emailJs.publicKey }
+    );
+
+    await updateSupportReportMailDelivery(mailId, userId, 'SUCCESS', { state: 'SUCCESS' });
+    traceLog.info('FIRESTORE', 'submitSupportReport', 'support report delivered', { mailId, category: input.category });
+  } catch (error: unknown) {
+    const deliveryError = getEmailJsDeliveryError(error);
+    try {
+      await updateSupportReportMailDelivery(mailId, userId, 'ERROR', {
+        state: 'ERROR',
+        error: deliveryError,
+      });
+    } catch (updateErr: unknown) {
+      traceLog.warn('FIRESTORE', 'submitSupportReport', 'failed to record delivery error', {
+        mailId,
+        error: updateErr instanceof Error ? updateErr.message : String(updateErr),
+      });
+    }
+    throw error instanceof Error ? error : new Error(deliveryError);
+  }
+
+  return { mailId, subject };
 }
