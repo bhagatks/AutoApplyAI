@@ -1,6 +1,6 @@
 # AutoApplyAI — architecture (v2)
 
-**Last updated:** 2026-06-13
+**Last updated:** 2026-06-14
 
 ## What it is (30 seconds)
 
@@ -16,6 +16,7 @@ AutoApplyAI is a Chrome extension plus web dashboard that helps job seekers tail
 | **Web dashboard** | `src/dashboard/` | Hosted on Firebase; login, extension setup, job workspace |
 | **Landing** | `src/landing/` | Marketing / login entry |
 | **Shared** | `src/shared/` | AI, DB, resume engine, types, storage — used by all contexts |
+| **Resume parser** | `src/parser/` | Dual-route PDF/DOCX/TXT parser (deterministic + Gemini) |
 
 Build: Vite + TypeScript + React + Tailwind. Output goes to `dist/` (load unpacked in Chrome). Do not hand-edit `dist/`.
 
@@ -49,6 +50,7 @@ src/
 ├── landing/             # Landing / login page
 ├── apply/               # Job-application adapters (types)
 ├── config/              # `app-config-manager.ts`, `firestore-paths.ts`, env-aware URLs
+├── parser/              # Dual-route resume parser (`types`, `index`, `engines/*`)
 └── shared/
     ├── ai.ts            # Gemini / multi-provider AI passes + resume parsing
     ├── tailor-job.ts    # End-to-end tailor orchestration
@@ -95,5 +97,7 @@ npm run test:flow
 | 2026-06-13 | Sentry init reads `appConfig/sentry` (`dsn`, `enabled`) via cache; falls back to `VITE_SENTRY_DSN` / `VITE_SENTRY_ENABLED` when Firestore unavailable |
 | 2026-06-13 | `app-config-manager.ts` — unified dev/prod routing (`getFirestorePath`), `getLLMCredentials()`, `resolveMonitoringConfig()`; dashboard boot uses `waitForAuthGateway()` |
 | 2026-06-13 | User Firestore paths: removed `config` subcollection; `customerConfig` → `userData/userData`; sibling docs under `userData/*` (existing user data wiped manually) |
+| 2026-06-14 | `parseResumeFile` orchestrator — routes Gemini 2.0 Flash to native parser, other providers/models to legacy `ai.ts` stack; MicroOnboarding wired to single entry point |
+| 2026-06-14 | `src/parser/` — dual-route resume parser (`NormalizedResume`, deterministic keyword engine, Gemini `gemini-2.0-flash` schema route, `parseResumeFile` orchestrator) |
 | 2026-06-14 | `ai-models-cache.ts` — reads `aiModelsUpdate` from `appConfig/dataRefresh.aiModelsUpdate` (flat) or `appConfig/appConfig.dataRefresh.aiModelsUpdate` (nested); re-read TTL from `dataRefresh.interval` (mins) |
 | 2026-06-13 | Admin `inspect-mail-queue.ts` + `npm run inspect:mail` — reads namespaced mail collection (`FIRESTORE_ENV` selects `dev` vs `prod`) |

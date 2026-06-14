@@ -7,8 +7,6 @@ import { mergeSkillsForUser, MAX_USER_CUSTOM_SKILLS, getBundledCoreSkillCatalog 
 import { formatAiErrorToast, getAiErrorToastVariant } from '../../shared/ai-errors';
 import {
   verifyProviderApiKey,
-  parseResumeWithAI,
-  extractResumeDocumentText,
   saveResumeToDirectory,
   fetchAvailableModels,
   getCachedModels,
@@ -20,6 +18,7 @@ import {
   ApiKeyVerificationResult,
   isScanCancelledError,
 } from '../../shared/ai';
+import { parseResumeFile } from '../../parser';
 import {
   WorkExperience,
   emptyWorkExperience,
@@ -513,27 +512,15 @@ export default function MicroOnboarding({ userId, onComplete, onSignOut, onOpenR
         );
       }
 
-      setScanStatus('Extracting text from document...');
-
       try {
-        const extraction = await extractResumeDocumentText(file, scanSignal);
-        throwIfScanCancelled();
-        if (!extraction.text.trim()) {
-          throw new Error('No readable text found in the document.');
-        }
-
-        setScanStatus(useAiParsing ? 'Structuring profile with AI...' : 'Extracting profile from resume text...');
-        const scanResult = await parseResumeWithAI(
+        const scanResult = await parseResumeFile(file, {
+          isAiEnabled: useAiParsing,
           aiProvider,
-          geminiApiKey.trim(),
-          extraction.text,
           activeModel,
-          file.name,
-          setScanStatus,
-          scanSignal,
-          extraction.warnings,
-          { useAiParsing, pageCount: extraction.pageCount }
-        );
+          geminiApiKey: geminiApiKey.trim(),
+          signal: scanSignal,
+          onStatus: setScanStatus,
+        });
         throwIfScanCancelled();
         const parsed = scanResult.resume;
 
